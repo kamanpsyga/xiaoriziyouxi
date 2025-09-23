@@ -348,11 +348,10 @@ class XServerAutoLogin:
                     # 根据配置选择验证码获取方式
                     verification_code = None
                     
-                    # 手动输入验证码
+                    # 在GitHub Actions环境中，返回特殊状态让main.py处理验证码
                     if IS_GITHUB_ACTIONS:
-                        print("❌ GitHub Actions环境中无法手动输入验证码")
-                        print("💡 请在本地环境中运行此脚本")
-                        return False
+                        print("🤖 GitHub Actions环境，等待main.py自动获取验证码...")
+                        return "need_verification_code"
                     
                     print("🔑 请手动输入验证码...")
                     verification_code = input("请输入收到的验证码: ").strip()
@@ -398,6 +397,34 @@ class XServerAutoLogin:
             
         except Exception as e:
             print(f"❌ 处理验证码输入页面时出错: {e}")
+            return False
+    
+    def input_verification_code_externally(self, verification_code):
+        """从外部输入验证码（用于main.py调用）"""
+        try:
+            print(f"🔑 正在输入外部获取的验证码: {verification_code}")
+            
+            # 查找验证码输入框
+            code_input = self.driver.find_element(By.XPATH, "//input[@id='auth_code'][@name='auth_code']")
+            
+            # 清空并输入验证码
+            code_input.clear()
+            self.human_type(code_input, verification_code)
+            print("✅ 验证码已输入")
+            
+            # 查找并点击登录按钮
+            print("🔍 正在查找ログイン按钮...")
+            login_submit_button = self.driver.find_element(By.XPATH, "//input[@type='submit'][@value='ログイン']")
+            print("✅ 找到ログイン按钮")
+            login_submit_button.click()
+            print("✅ 验证码已提交")
+            
+            # 等待验证结果
+            time.sleep(5)
+            return True
+            
+        except Exception as e:
+            print(f"❌ 输入验证码失败: {e}")
             return False
     
     
@@ -698,7 +725,7 @@ class XServerAutoLogin:
                 print(f"   实际URL: {current_url}")
                 return False
             
-            print("✅ 登录成功！已跳转到XServer GAME管理页面")
+                print("✅ 登录成功！已跳转到XServer GAME管理页面")
             
             # 等待页面加载完成
             print("⏰ 等待页面加载完成...")
@@ -738,7 +765,7 @@ class XServerAutoLogin:
                 print(f"❌ 查找或点击ゲーム管理按钮时出错: {e}")
                 self.take_screenshot("game_button_error")
                 return False
-        
+            
         except Exception as e:
             print(f"❌ 检查登录结果时出错: {e}")
             return False
