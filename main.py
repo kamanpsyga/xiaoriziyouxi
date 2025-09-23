@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-XServer GAME 自动登录脚本 - Playwright版本
-基于 Playwright 和 playwright-stealth 实现绕过反机器人检测
-支持自动验证码获取和手动输入两种模式
+XServer GAME 自动登录和续期脚本
 """
 
 import asyncio
