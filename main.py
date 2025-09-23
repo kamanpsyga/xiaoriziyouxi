@@ -8,14 +8,14 @@ XServer GAME 自动登录主控脚本
 import os
 import sys
 import time
-import subprocess
-import threading
-import queue
 from pathlib import Path
 
 # 导入自定义脚本模块
 from login import XServerAutoLogin
 from code import WebmailAutoLogin
+
+# 导入Selenium组件
+from selenium.webdriver.common.by import By
 
 # =====================================================================
 #                          配置区域
@@ -47,7 +47,6 @@ class XServerMainController:
         self.xserver_login = None
         self.webmail_login = None
         self.verification_code = None
-        self.verification_queue = queue.Queue()
         self.login_state = "initial"  # initial, waiting_verification, completed, failed
         
     def create_xserver_login(self):
@@ -128,83 +127,198 @@ class XServerMainController:
             self.login_state = "failed"
             return False
     
-    def get_verification_code_async(self):
-        """异步获取验证码"""
-        def get_code():
+    def get_verification_code_in_new_tab(self):
+        """在XServer浏览器中新开标签页获取验证码"""
+        try:
+            print("📧 开始在新标签页获取邮箱验证码...")
+            
+            # 等待一段时间让验证码邮件发送
+            print("⏰ 等待验证码邮件发送...")
+            time.sleep(30)
+            
+            # 保存当前XServer标签页
+            original_window = self.xserver_login.driver.current_window_handle
+            print(f"💾 保存XServer标签页: {original_window}")
+            
+            # 在当前浏览器中新开标签页
+            print("🆕 打开新标签页用于邮箱登录...")
+            self.xserver_login.driver.execute_script("window.open('');")
+            
+            # 切换到新标签页
+            all_windows = self.xserver_login.driver.window_handles
+            new_window = [w for w in all_windows if w != original_window][0]
+            self.xserver_login.driver.switch_to.window(new_window)
+            print(f"🔄 已切换到新标签页: {new_window}")
+            
+            # 使用XServer的浏览器实例进行邮箱登录
+            driver = self.xserver_login.driver
+            
+            # 导航到邮箱登录页面
+            print(f"🌐 正在访问邮箱: {WEBMAIL_URL}")
+            driver.get(WEBMAIL_URL)
+            time.sleep(3)
+            print("✅ 邮箱页面加载成功")
+            
+            # 执行邮箱登录
+            if self.perform_webmail_login_in_tab(driver):
+                # 获取验证码
+                code = self.extract_verification_code_in_tab(driver)
+                
+                # 关闭邮箱标签页
+                print("🗑️ 关闭邮箱标签页...")
+                driver.close()
+                
+                # 切换回XServer标签页
+                self.xserver_login.driver.switch_to.window(original_window)
+                print("🔙 已切换回XServer标签页")
+                
+                return code
+            else:
+                # 登录失败，关闭标签页
+                driver.close()
+                self.xserver_login.driver.switch_to.window(original_window)
+                return None
+                
+        except Exception as e:
+            print(f"❌ 在新标签页获取验证码失败: {e}")
             try:
-                print("📧 开始获取邮箱验证码...")
+                # 确保切换回原标签页
+                self.xserver_login.driver.switch_to.window(original_window)
+            except:
+                pass
+            return None
+    
+    def perform_webmail_login_in_tab(self, driver):
+        """在标签页中执行邮箱登录"""
+        try:
+            print("🔍 正在查找邮箱登录表单...")
+            time.sleep(3)  # 等待页面加载
+            
+            # 查找邮箱输入框
+            email_input = driver.find_element(By.XPATH, "//input[@placeholder='邮箱']")
+            print("✅ 找到邮箱输入框")
+            
+            # 查找密码输入框
+            password_input = driver.find_element(By.XPATH, "//input[@placeholder='密码']")
+            print("✅ 找到密码输入框")
+            
+            # 查找登录按钮
+            login_button = driver.find_element(By.XPATH, "//button[@class='el-button el-button--primary btn']")
+            print("✅ 找到登录按钮")
+            
+            # 填写登录信息
+            print("📝 正在填写邮箱登录信息...")
+            email_input.clear()
+            email_input.send_keys(WEBMAIL_USERNAME)
+            print("✅ 邮箱已填写")
+            
+            time.sleep(2)
+            password_input.clear()
+            password_input.send_keys(WEBMAIL_PASSWORD)
+            print("✅ 密码已填写")
+            
+            # 点击登录
+            time.sleep(2)
+            login_button.click()
+            print("✅ 登录表单已提交")
+            
+            # 等待登录结果
+            time.sleep(5)
+            
+            # 检查是否登录成功
+            current_url = driver.current_url
+            if "email" in current_url:
+                print("✅ 邮箱登录成功！")
+                return True
+            else:
+                print("❌ 邮箱登录失败")
+                return False
                 
-                # 等待一段时间让验证码邮件发送
-                print("⏰ 等待验证码邮件发送...")
-                time.sleep(30)
+        except Exception as e:
+            print(f"❌ 邮箱登录过程出错: {e}")
+            return False
+    
+    def extract_verification_code_in_tab(self, driver):
+        """在标签页中提取验证码"""
+        try:
+            print("📧 正在选择目标邮箱...")
+            
+            # 选择目标邮箱
+            target_mailbox = driver.find_element(By.XPATH, f"//div[@class='account' and contains(text(), '{WEBMAIL_USERNAME}')]")
+            target_mailbox.click()
+            print(f"✅ 已选择 {WEBMAIL_USERNAME} 邮箱")
+            
+            time.sleep(3)
+            
+            # 搜索XServer验证码邮件
+            print("🔍 正在搜索XServer验证码邮件...")
+            
+            # 滚动页面加载所有邮件
+            print("📜 正在滚动页面加载所有邮件...")
+            for i in range(3):
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+            print("✅ 页面滚动完成，邮件列表已加载")
+            
+            # 查找XServer邮件
+            xserver_emails = driver.find_elements(By.XPATH, "//div[contains(text(), 'XServerアカウント') and contains(text(), 'ログイン用認証コード')]")
+            
+            if xserver_emails:
+                print(f"✅ 找到 {len(xserver_emails)} 封XServer邮件")
                 
-                # 初始化并运行邮箱登录
-                if not self.webmail_login.setup_driver():
-                    self.verification_queue.put(None)
-                    return
+                # 点击第一封（最新的）邮件
+                first_email = xserver_emails[0]
+                first_email.click()
+                print("🎯 正在打开最新的XServerアカウント邮件...")
+                time.sleep(3)
                 
-                if not self.webmail_login.navigate_to_webmail():
-                    self.verification_queue.put(None)
-                    return
+                # 提取验证码
+                page_source = driver.page_source
                 
-                if not self.webmail_login.perform_login():
-                    self.verification_queue.put(None)
-                    return
+                # 使用code.py中的验证码提取逻辑
+                import re
+                code_patterns = [
+                    r'【認証コード】[　\s]*：[　\s]*(\d{4,8})',
+                    r'【認証コード】[　\s]*[：:][　\s]*(\d{4,8})',
+                    r'認証コード[　\s]*[：:][　\s]*(\d{4,8})',
+                ]
                 
-                if not self.webmail_login.check_login_result():
-                    self.verification_queue.put(None)
-                    return
+                for pattern in code_patterns:
+                    matches = re.findall(pattern, page_source, re.IGNORECASE | re.MULTILINE)
+                    if matches:
+                        valid_codes = [code for code in matches if len(code) >= 4 and len(code) <= 8]
+                        if valid_codes:
+                            verification_code = valid_codes[0]
+                            print(f"✅ 找到验证码: {verification_code}")
+                            return verification_code
                 
-                if not self.webmail_login.select_target_mailbox():
-                    self.verification_queue.put(None)
-                    return
+                print("❌ 未能从邮件中提取到验证码")
+                return None
+            else:
+                print("❌ 未找到XServer验证码邮件")
+                return None
                 
-                # 搜索验证邮件并提取验证码
-                if self.webmail_login.search_verification_email():
-                    code = self.webmail_login.extract_verification_code()
-                    self.verification_queue.put(code)
-                else:
-                    self.verification_queue.put(None)
-                    
-            except Exception as e:
-                print(f"❌ 获取验证码过程出错: {e}")
-                self.verification_queue.put(None)
-            # 注意：不在这里清理浏览器，等验证码输入完成后再清理
-        
-        # 在新线程中启动验证码获取
-        thread = threading.Thread(target=get_code)
-        thread.daemon = True
-        thread.start()
-        return thread
+        except Exception as e:
+            print(f"❌ 提取验证码失败: {e}")
+            return None
     
     def wait_for_verification_code(self, timeout=VERIFICATION_TIMEOUT):
-        """等待验证码获取完成"""
+        """获取验证码（在XServer浏览器新标签页中处理）"""
         try:
-            print(f"⏰ 等待验证码获取完成 (超时: {timeout}秒)...")
+            print(f"🔍 开始获取验证码（新标签页模式）...")
             
-            # 启动异步获取验证码
-            code_thread = self.get_verification_code_async()
+            # 在XServer浏览器新标签页中获取验证码
+            code = self.get_verification_code_in_new_tab()
             
-            # 等待结果
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                try:
-                    # 检查是否有验证码结果
-                    code = self.verification_queue.get(timeout=5)
-                    if code:
-                        print(f"✅ 成功获取验证码: {code}")
-                        self.verification_code = code
-                        return code
-                    else:
-                        print("❌ 验证码获取失败")
-                        return None
-                except queue.Empty:
-                    # 继续等待
-                    print("⏳ 继续等待验证码...")
-                    continue
-            
-            print("⏰ 验证码获取超时")
-            return None
+            if code:
+                print(f"✅ 成功获取验证码: {code}")
+                self.verification_code = code
+                return code
+            else:
+                print("❌ 验证码获取失败")
+                return None
             
         except Exception as e:
             print(f"❌ 等待验证码时出错: {e}")
@@ -287,20 +401,12 @@ class XServerMainController:
                 
                 if not code:
                     print("❌ 无法获取验证码，登录失败")
-                    # 获取验证码失败也要清理邮箱浏览器
-                    self.cleanup_webmail_only()
                     return False
                 
-                # 4. 输入验证码
+                # 4. 输入验证码（邮箱浏览器已在获取验证码后清理）
                 if not self.input_verification_code(code):
                     print("❌ 验证码输入失败")
-                    # 即使失败也要清理邮箱浏览器
-                    self.cleanup_webmail_only()
                     return False
-                
-                # 验证码输入成功，立即清理邮箱浏览器
-                print("🧹 验证码输入完成，清理邮箱浏览器...")
-                self.cleanup_webmail_only()
                 
                 # 5. 完成登录流程
                 return self.complete_login_flow()
@@ -322,15 +428,6 @@ class XServerMainController:
             # 清理资源
             self.cleanup()
     
-    def cleanup_webmail_only(self):
-        """只清理邮箱登录器"""
-        try:
-            if self.webmail_login and self.webmail_login.driver:
-                print("🧹 清理邮箱登录器...")
-                self.webmail_login.cleanup()
-        except Exception as e:
-            print(f"⚠️ 清理邮箱资源时出错: {e}")
-    
     def cleanup(self):
         """清理所有资源"""
         try:
@@ -340,9 +437,6 @@ class XServerMainController:
                     print("⏰ 浏览器将在 30 秒后关闭...")
                     time.sleep(30)
                 self.xserver_login.cleanup()
-            
-            # 确保邮箱登录器也被清理
-            self.cleanup_webmail_only()
                 
         except Exception as e:
             print(f"⚠️ 清理资源时出错: {e}")
