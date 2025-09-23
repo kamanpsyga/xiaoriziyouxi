@@ -1,0 +1,89 @@
+name: XServer GAME 自动登录
+
+on:
+  schedule:
+    # 每8小时运行一次 (UTC时间: 0:00, 8:00, 16:00)
+    - cron: '0 */8 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  auto-login:
+    runs-on: ubuntu-22.04
+    
+    # 授予工作流写入仓库内容的权限
+    permissions:
+      contents: write
+      actions: write
+    
+    steps:
+    - name: 🔄 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 🐍 设置 Python 环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 安装 Python 依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🎭 安装 Chrome 浏览器
+      run: |
+        # 更新包列表
+        sudo apt-get update
+        
+        # 安装Chrome浏览器 (undetected-chromedriver会自动管理驱动)
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+        
+    - name: 🚀 运行 XServer 自动登录
+      env:
+        # XServer 登录凭据 (脚本会自动读取这些环境变量)
+        XSERVER_EMAIL: ${{ secrets.XSERVER_EMAIL }}
+        XSERVER_PASSWORD: ${{ secrets.XSERVER_PASSWORD }}
+        
+        # 邮箱验证凭据 (脚本会自动读取这些环境变量)
+        WEBMAIL_USERNAME: ${{ secrets.WEBMAIL_USERNAME }}
+        WEBMAIL_PASSWORD: ${{ secrets.WEBMAIL_PASSWORD }}
+        TARGET_MAILBOX: ${{ secrets.TARGET_MAILBOX }}
+        
+        # 注意：不需要设置以下变量，脚本会自动处理：
+        # - GITHUB_ACTIONS (系统自动设置)
+        # - USE_HEADLESS (脚本检测到GITHUB_ACTIONS自动启用)
+        # - AUTO_VERIFICATION (脚本默认为true)
+      run: |
+        # 直接运行脚本，所有配置都由脚本内部处理
+        python main.py
+        
+    - name: 📸 上传运行结果
+      if: always()  # 无论成功失败都上传
+      uses: actions/upload-artifact@v4
+      with:
+        name: xserver-login-results-${{ github.run_number }}
+        path: |
+          *.png
+          *.log
+        retention-days: 7  # 保留7天
+        
+    - name: 📋 显示运行结果
+      if: always()
+      run: |
+        echo "=== XServer 登录任务完成 ==="
+        echo "📸 生成的截图文件："
+        ls -la *.png 2>/dev/null || echo "无截图文件"
+        echo "📋 生成的日志文件："
+        ls -la *.log 2>/dev/null || echo "无日志文件"
+        echo "📁 工作目录内容："
+        ls -la
+
+    - name: 🧹 清理旧的工作流运行记录
+      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      with:
+        repository: ${{ github.repository }}
+        older-than-seconds: 172800  # 删除2天前的记录
