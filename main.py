@@ -100,10 +100,20 @@ class XServerMainController:
                 return False
             
             # 检查是否需要验证
-            if self.xserver_login.handle_verification_page():
+            verification_result = self.xserver_login.handle_verification_page()
+            if verification_result == "need_verification_code":
                 print("🔐 检测到需要验证码，准备自动获取...")
                 self.login_state = "waiting_verification"
                 return "need_verification"
+            elif verification_result == True:
+                print("✅ 验证流程已完成")
+                # 检查登录结果
+                if self.xserver_login.handle_login_result():
+                    self.login_state = "completed"
+                    return True
+                else:
+                    self.login_state = "failed"
+                    return False
             else:
                 # 直接检查登录结果
                 if self.xserver_login.handle_login_result():
@@ -206,25 +216,10 @@ class XServerMainController:
     def input_verification_code(self, code):
         """向XServer页面输入验证码"""
         try:
-            print(f"🔑 正在输入验证码: {code}")
+            print(f"🔑 将验证码输入到XServer页面: {code}")
             
-            # 查找验证码输入框
-            from selenium.webdriver.common.by import By
-            code_input = self.xserver_login.driver.find_element(By.XPATH, "//input[@id='auth_code'][@name='auth_code']")
-            
-            # 清空并输入验证码
-            code_input.clear()
-            self.xserver_login.human_type(code_input, code)
-            print("✅ 验证码已输入")
-            
-            # 查找并点击登录按钮
-            login_submit_button = self.xserver_login.driver.find_element(By.XPATH, "//input[@type='submit'][@value='ログイン']")
-            login_submit_button.click()
-            print("✅ 验证码已提交")
-            
-            # 等待验证结果
-            time.sleep(5)
-            return True
+            # 使用login.py的外部验证码输入方法
+            return self.xserver_login.input_verification_code_externally(code)
             
         except Exception as e:
             print(f"❌ 输入验证码失败: {e}")
