@@ -73,7 +73,7 @@ class XServerAutoLogin:
     # =================================================================
     #                       1. 浏览器管理模块
     # =================================================================
-    
+        
     def setup_driver(self):
         """设置 Chrome 驱动"""
         try:
@@ -89,6 +89,18 @@ class XServerAutoLogin:
             options.add_argument('--disable-gpu')
             options.add_argument('--disable-notifications')
             options.add_argument('--window-size=1920,1080')
+            
+            # 字体和语言支持
+            options.add_argument('--lang=ja-JP')  # 设置日语环境
+            options.add_argument('--accept-lang=ja-JP,ja,en-US,en')
+            
+            # 字体设置，确保日文正确显示
+            prefs = {
+                "intl.accept_languages": "ja-JP,ja,en-US,en",
+                "profile.default_content_setting_values.notifications": 2,
+                "profile.default_content_settings.popups": 0
+            }
+            options.add_experimental_option("prefs", prefs)
             
             # 创建 undetected Chrome 实例（它会自动处理反检测）
             self.driver = uc.Chrome(options=options)
@@ -455,120 +467,406 @@ class XServerAutoLogin:
             self.driver.get(self.webmail_url)
             
             # 等待页面加载
-            time.sleep(3)
+            WebDriverWait(self.driver, self.wait_timeout).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            print("✅ 邮箱页面加载成功")
             
-            # 查找并填写邮箱登录表单
-            try:
-                email_input = self.driver.find_element(By.XPATH, "//input[@placeholder='邮箱']")
-                password_input = self.driver.find_element(By.XPATH, "//input[@placeholder='密码']")
-                login_button = self.driver.find_element(By.XPATH, "//button[@class='el-button el-button--primary btn']")
-                
-                print("📝 正在填写邮箱登录信息...")
-                email_input.clear()
-                self.human_type(email_input, self.webmail_username)
-                
-                time.sleep(1)
-                
-                password_input.clear()
-                self.human_type(password_input, self.webmail_password)
-                
-                time.sleep(1)
-                
-                login_button.click()
-                print("✅ 邮箱登录表单已提交")
-                
-                # 等待登录完成
-                time.sleep(5)
-                
-                # 选择目标邮箱
-                return self.select_target_mailbox()
-                
-            except Exception as e:
-                print(f"❌ 邮箱登录失败: {e}")
+            # 执行登录
+            if not self.perform_webmail_login():
                 return False
+            
+            # 检查登录结果
+            if not self.check_webmail_login_result():
+                print("⚠️ 邮箱登录可能失败")
+                return False
+            
+            print("🎉 邮箱登录成功！")
+            
+            # 选择目标邮箱
+            return self.select_target_mailbox()
                 
         except Exception as e:
             print(f"❌ 访问邮箱失败: {e}")
             return False
     
+    def find_webmail_login_form(self):
+        """查找邮箱登录表单"""
+        try:
+            print("🔍 正在查找登录表单...")
+            
+            # 等待页面完全加载
+            print("⏰ 等待页面完全加载...")
+            time.sleep(5)
+            
+            # 打印页面信息用于调试
+            print(f"📍 当前URL: {self.driver.current_url}")
+            print(f"📄 页面标题: {self.driver.title}")
+            
+            # 检查页面是否包含预期元素
+            page_source = self.driver.page_source
+            if "邮箱" in page_source or "email" in page_source.lower():
+                print("✅ 页面包含邮箱相关内容")
+            else:
+                print("⚠️ 页面可能未完全加载或结构不同")
+            
+            # 登录部分已确定，保持简化
+            email_selectors = [
+                "//input[@placeholder='邮箱']",   # 已确定有效
+            ]
+
+            password_selectors = [
+                "//input[@placeholder='密码']",   # 已确定有效
+            ]
+
+            login_selectors = [
+                "//button[@class='el-button el-button--primary btn']",  # 已确定有效
+            ]
+            
+            # 查找邮箱输入框
+            email_input = None
+            for selector in email_selectors:
+                try:
+                    email_input = self.driver.find_element(By.XPATH, selector)
+                    print(f"✅ 找到邮箱输入框: {selector}")
+                    break
+                except:
+                    continue
+            
+            # 查找密码输入框
+            password_input = None
+            for selector in password_selectors:
+                try:
+                    password_input = self.driver.find_element(By.XPATH, selector)
+                    print(f"✅ 找到密码输入框: {selector}")
+                    break
+                except:
+                    continue
+            
+            # 查找登录按钮
+            login_button = None
+            for selector in login_selectors:
+                try:
+                    login_button = self.driver.find_element(By.XPATH, selector)
+                    print(f"✅ 找到登录按钮: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not email_input:
+                print("❌ 未找到邮箱输入框")
+                return None, None, None
+            
+            if not password_input:
+                print("❌ 未找到密码输入框")
+                return None, None, None
+            
+            if not login_button:
+                print("⚠️ 未找到登录按钮，将尝试使用回车键提交")
+            
+            return email_input, password_input, login_button
+            
+        except Exception as e:
+            print(f"❌ 查找登录表单失败: {e}")
+            return None, None, None
+    
+    def perform_webmail_login(self):
+        """执行邮箱登录"""
+        try:
+            # 查找登录表单
+            email_input, password_input, login_button = self.find_webmail_login_form()
+            
+            if not email_input or not password_input:
+                return False
+            
+            print("📝 正在填写登录信息...")
+            
+            # 填写邮箱
+            email_input.clear()
+            self.human_type(email_input, self.webmail_username)
+            print("✅ 邮箱已填写")
+            
+            # 等待一下
+            time.sleep(1)
+            
+            # 填写密码
+            password_input.clear()
+            self.human_type(password_input, self.webmail_password)
+            print("✅ 密码已填写")
+            
+            # 等待一下
+            time.sleep(1)
+            
+            # 提交登录
+            if login_button:
+                print("🖱️ 点击登录按钮...")
+                login_button.click()
+            else:
+                print("⌨️ 使用回车键提交...")
+                password_input.send_keys("\n")
+            
+            print("✅ 登录表单已提交")
+            
+            # 等待页面响应
+            time.sleep(5)
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 执行登录失败: {e}")
+            return False
+    
+    def check_webmail_login_result(self):
+        """检查邮箱登录结果"""
+        try:
+            print("🔍 正在检查登录结果...")
+            
+            current_url = self.driver.current_url.lower()
+            page_source = self.driver.page_source.lower()
+            page_title = self.driver.title
+            
+            print(f"📍 当前URL: {current_url}")
+            print(f"📄 页面标题: {page_title}")
+            
+            # 首先检查是否跳转到邮箱页面（明确的成功标识）
+            if "zmkk.edu.kg/email" in current_url:
+                print("✅ 成功跳转到邮箱页面，登录成功！")
+                return True
+            
+            # 检查是否有错误信息
+            error_indicators = [
+                "error", "错误", "失败", "incorrect", "invalid", 
+                "wrong", "密码错误", "用户名错误", "登录失败"
+            ]
+            
+            for indicator in error_indicators:
+                if indicator in page_source:
+                    print(f"❌ 检测到错误信息: {indicator}")
+                    return False
+            
+            # 检查其他成功标识
+            success_indicators = [
+                "inbox", "收件箱", "邮箱", "mailbox", "mail", 
+                "welcome", "欢迎", "dashboard", "控制面板"
+            ]
+            
+            for indicator in success_indicators:
+                if indicator in page_source or indicator in page_title.lower():
+                    print(f"✅ 检测到成功标识: {indicator}")
+                    return True
+            
+            # 检查URL变化（不在登录页面）
+            if current_url != self.webmail_url.lower() and "login" not in current_url:
+                print("✅ URL已改变，登录可能成功")
+                return True
+            
+            # 如果还在登录页面
+            if "login" in current_url:
+                print("⚠️ 仍在登录页面，登录可能失败")
+                return False
+            
+            print("✅ 登录状态检查完成")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 检查登录结果失败: {e}")
+            return False
+    
     def select_target_mailbox(self):
-        """选择目标邮箱"""
+        """选择目标邮箱 faiz555@zmkk.edu.kg"""
         try:
             print("📧 正在选择目标邮箱...")
+            
+            # 等待邮箱列表加载
             time.sleep(3)
             
-            mailbox_element = self.driver.find_element(By.XPATH, f"//div[@class='account' and contains(text(), '{self.target_mailbox}')]")
-            mailbox_element.click()
-            print(f"✅ 已选择 {self.target_mailbox} 邮箱")
+            # 邮箱选择已确定，保持简化
+            mailbox_selectors = [
+                "//div[@class='account' and contains(text(), 'faiz555@zmkk.edu.kg')]",  # 已确定有效
+            ]
             
+            mailbox_element = None
+            for selector in mailbox_selectors:
+                try:
+                    mailbox_element = self.driver.find_element(By.XPATH, selector)
+                    print(f"✅ 找到目标邮箱: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not mailbox_element:
+                print("❌ 未找到 faiz555@zmkk.edu.kg 邮箱")
+                return False
+            
+            # 点击进入邮箱
+            mailbox_element.click()
+            print("✅ 已选择 faiz555@zmkk.edu.kg 邮箱")
+            
+            # 等待邮箱内容加载
             time.sleep(5)
+            
             return True
             
         except Exception as e:
             print(f"❌ 选择邮箱失败: {e}")
             return False
     
-    def get_verification_from_email(self):
-        """从邮件中提取验证码"""
+    def scroll_to_load_emails(self):
+        """滚动页面确保所有邮件都加载完成"""
         try:
-            print("🔍 正在搜索验证码邮件...")
+            # 获取当前页面高度
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
             
-            # 刷新页面确保获取最新邮件
-            self.driver.refresh()
-            time.sleep(5)
+            # 滚动几次确保邮件列表完全加载
+            for i in range(3):
+                # 滚动到页面底部
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1)
+                
+                # 检查是否有新内容加载
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
             
-            # 查找XServer验证码邮件
-            email_selectors = [
-                "//*[contains(text(), '【XServerアカウント】ログイン用認証コードのお知らせ')]",
-                "//*[contains(text(), 'XServerアカウント') and contains(text(), 'ログイン用認証コード')]",
-                "//*[contains(text(), 'ログイン用認証コードのお知らせ')]"
+            # 滚动回到顶部
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+            print("✅ 页面滚动完成，邮件列表已加载")
+            
+        except Exception as e:
+            print(f"⚠️ 滚动页面失败: {e}")
+
+    def search_verification_email(self):
+        """搜索验证码邮件"""
+        try:
+            print("🔍 正在搜索XServer验证码邮件...")
+            
+            # 等待邮箱页面完全加载
+            time.sleep(3)
+            
+            # 尝试刷新收件箱
+            refresh_selectors = [
+                "//button[contains(text(), '刷新')]",
+                "//button[contains(text(), 'Refresh')]",
+                "//button[contains(@class, 'refresh')]",
+                "//i[contains(@class, 'refresh')]/parent::button"
             ]
             
-            email_element = None
-            for selector in email_selectors:
+            for selector in refresh_selectors:
                 try:
-                    email_elements = self.driver.find_elements(By.XPATH, selector)
-                    if email_elements:
-                        email_element = email_elements[0]  # 取最新的
-                        print("✅ 找到验证码邮件")
-                        break
+                    refresh_btn = self.driver.find_element(By.XPATH, selector)
+                    refresh_btn.click()
+                    print("✅ 已刷新收件箱")
+                    time.sleep(2)
+                    break
                 except:
                     continue
             
-            if not email_element:
-                print("❌ 未找到验证码邮件")
-                return None
-            
-            # 点击邮件
-            email_element.click()
-            time.sleep(3)
-            
-            # 提取验证码
-            page_source = self.driver.page_source
-            
-            # 使用正则表达式提取验证码
-            code_patterns = [
-                r'【認証コード】[　\s]*：[　\s]*(\d{4,8})',
-                r'【認証コード】[　\s]*[：:][　\s]*(\d{4,8})',
-                r'認証コード[　\s]*[：:][　\s]*(\d{4,8})'
+            # 精确定位验证码邮件 - 查找完整的邮件标题
+            email_selectors = [
+                # 最精确的选择器 - 完整的邮件标题
+                "//*[contains(text(), '【XServerアカウント】ログイン用認証コードのお知らせ')]",
+                
+                # 备用选择器 - 分段匹配
+                "//*[contains(text(), 'XServerアカウント') and contains(text(), 'ログイン用認証コード')]",
+                "//*[contains(text(), 'ログイン用認証コードのお知らせ')]",
+                "//*[contains(text(), '認証コード') and contains(text(), 'お知らせ')]",
             ]
             
+            # 滚动页面确保所有邮件都加载完成
+            print("📜 正在滚动页面加载所有邮件...")
+            self.scroll_to_load_emails()
+            
+            # 统计所有找到的XServer邮件
+            print("🔍 正在统计所有XServerアカウント邮件...")
+            
+            all_xserver_emails = []
+            successful_selectors = []
+            
+            # 使用优化后的选择器查找邮件
+            for selector in email_selectors:
+                try:
+                    emails = self.driver.find_elements(By.XPATH, selector)
+                    if emails:
+                        # 去重：避免同一封邮件被多个选择器重复找到
+                        unique_emails = []
+                        for email in emails:
+                            if email not in all_xserver_emails:
+                                unique_emails.append(email)
+                                all_xserver_emails.append(email)
+                        
+                        if unique_emails:
+                            print(f"✅ 找到 {len(unique_emails)} 封新的XServer邮件")
+                            successful_selectors.append(selector)
+                        
+                except Exception as e:
+                    print(f"⚠️ 选择器查找失败: {e}")
+                    continue
+            
+            # 显示统计结果
+            print(f"\n📊 统计结果:")
+            print(f"   🎯 总共找到: {len(all_xserver_emails)} 封XServerアカウント邮件")
+            print(f"   ✅ 有效选择器: {len(successful_selectors)} 个")
+            
+            if all_xserver_emails:
+                print(f"   📧 邮件列表:")
+                for i, email in enumerate(all_xserver_emails[:5], 1):  # 只显示前5封
+                    try:
+                        email_text = email.text.strip()[:100]  # 截取前100个字符
+                        print(f"      {i}. {email_text}...")
+                    except:
+                        print(f"      {i}. [无法获取邮件文本]")
+                
+                if len(all_xserver_emails) > 5:
+                    print(f"      ... 还有 {len(all_xserver_emails) - 5} 封邮件")
+                
+                # 点击第一封邮件（最新的）
+                print(f"\n🎯 正在打开第一封（最新的）XServerアカウント邮件...")
+                try:
+                    first_email = all_xserver_emails[0]
+                    first_email.click()
+                    print("✅ 已成功打开最新的XServerアカウント邮件")
+                    time.sleep(3)
+                    return True
+                except Exception as e:
+                    print(f"❌ 点击邮件失败: {e}")
+                    return False
+            else:
+                print("   ❌ 未找到任何XServerアカウント邮件")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 搜索验证邮件失败: {e}")
+            return False
+    
+    def extract_verification_code(self):
+        """从邮件内容中提取验证码"""
+        try:
+            print("🔍 正在提取验证码...")
+            
+            # 获取页面内容
+            page_source = self.driver.page_source
+            
+            # 根据日志确定的有效验证码匹配模式
+            code_patterns = [
+                # 主要模式 - 日志显示成功的模式
+                r'【認証コード】[　\s]*：[　\s]*(\d{4,8})',
+                
+                # 备用模式
+                r'【認証コード】[　\s]*[：:][　\s]*(\d{4,8})',
+                r'認証コード[　\s]*[：:][　\s]*(\d{4,8})',
+            ]
+            
+            # 使用确定有效的模式提取验证码
             for pattern in code_patterns:
                 matches = re.findall(pattern, page_source, re.IGNORECASE | re.MULTILINE)
                 if matches:
+                    # 过滤掉明显不是验证码的结果
                     valid_codes = [code for code in matches if len(code) >= 4 and len(code) <= 8]
                     if valid_codes:
                         verification_code = valid_codes[0]
-                        print(f"✅ 成功提取验证码: {verification_code}")
-                        
-                        # 尝试复制到剪贴板
-                        try:
-                            import pyperclip
-                            pyperclip.copy(verification_code)
-                            print("📋 验证码已复制到剪贴板")
-                        except:
-                            print("ℹ️ 无法复制到剪贴板")
-                        
+                        print(f"✅ 找到验证码: {verification_code}")
                         return verification_code
             
             print("❌ 未能提取到验证码")
@@ -576,6 +874,34 @@ class XServerAutoLogin:
             
         except Exception as e:
             print(f"❌ 提取验证码失败: {e}")
+            return None
+
+    def get_verification_from_email(self):
+        """从邮件中提取验证码"""
+        try:
+            print("🔍 自动开始搜索XServer验证邮件...")
+            if self.search_verification_email():
+                verification_code = self.extract_verification_code()
+                if verification_code:
+                    print(f"🎯 成功提取验证码: {verification_code}")
+                    print(f"📋 验证码已复制到剪贴板（如果支持）")
+                    # 尝试复制到剪贴板
+                    try:
+                        import pyperclip
+                        pyperclip.copy(verification_code)
+                        print("✅ 验证码已复制到剪贴板")
+                    except:
+                        print("ℹ️ 无法复制到剪贴板，请手动复制验证码")
+                    return verification_code
+                else:
+                    print("⚠️ 未能提取到验证码")
+                    return None
+            else:
+                print("⚠️ 未找到验证邮件")
+                return None
+                
+        except Exception as e:
+            print(f"❌ 获取验证码失败: {e}")
             return None
     
     # =================================================================
@@ -704,7 +1030,7 @@ class XServerAutoLogin:
         
         finally:
             self.cleanup()
-
+    
 
 # =====================================================================
 #                          主程序入口
@@ -746,7 +1072,7 @@ def main():
         print("✅ 登录流程执行成功！")
     else:
         print("❌ 登录流程执行失败！")
-
+    
 
 # =====================================================================
 #                          程序启动点
