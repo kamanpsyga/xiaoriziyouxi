@@ -29,16 +29,23 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: 🎭 安装 Chrome 浏览器
+    - name: 🎭 安装 Chrome 浏览器和日文字体
       run: |
         # 更新包列表
         sudo apt-get update
+        
+        # 安装日文字体包，支持日文显示
+        sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
         
         # 安装Chrome浏览器 (undetected-chromedriver会自动管理驱动)
         wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
         echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
+        
+        # 验证字体安装
+        echo "📝 已安装的日文字体："
+        fc-list | grep -i "noto.*cjk" | head -5
         
     - name: 🚀 运行 XServer 自动登录
       env:
