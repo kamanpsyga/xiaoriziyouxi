@@ -169,10 +169,7 @@ class XServerMainController:
             except Exception as e:
                 print(f"❌ 获取验证码过程出错: {e}")
                 self.verification_queue.put(None)
-            finally:
-                # 清理邮箱登录器
-                if self.webmail_login and self.webmail_login.driver:
-                    self.webmail_login.cleanup()
+            # 注意：不在这里清理浏览器，等验证码输入完成后再清理
         
         # 在新线程中启动验证码获取
         thread = threading.Thread(target=get_code)
@@ -290,12 +287,20 @@ class XServerMainController:
                 
                 if not code:
                     print("❌ 无法获取验证码，登录失败")
+                    # 获取验证码失败也要清理邮箱浏览器
+                    self.cleanup_webmail_only()
                     return False
                 
                 # 4. 输入验证码
                 if not self.input_verification_code(code):
                     print("❌ 验证码输入失败")
+                    # 即使失败也要清理邮箱浏览器
+                    self.cleanup_webmail_only()
                     return False
+                
+                # 验证码输入成功，立即清理邮箱浏览器
+                print("🧹 验证码输入完成，清理邮箱浏览器...")
+                self.cleanup_webmail_only()
                 
                 # 5. 完成登录流程
                 return self.complete_login_flow()
@@ -317,6 +322,15 @@ class XServerMainController:
             # 清理资源
             self.cleanup()
     
+    def cleanup_webmail_only(self):
+        """只清理邮箱登录器"""
+        try:
+            if self.webmail_login and self.webmail_login.driver:
+                print("🧹 清理邮箱登录器...")
+                self.webmail_login.cleanup()
+        except Exception as e:
+            print(f"⚠️ 清理邮箱资源时出错: {e}")
+    
     def cleanup(self):
         """清理所有资源"""
         try:
@@ -327,8 +341,8 @@ class XServerMainController:
                     time.sleep(30)
                 self.xserver_login.cleanup()
             
-            if self.webmail_login and self.webmail_login.driver:
-                self.webmail_login.cleanup()
+            # 确保邮箱登录器也被清理
+            self.cleanup_webmail_only()
                 
         except Exception as e:
             print(f"⚠️ 清理资源时出错: {e}")
