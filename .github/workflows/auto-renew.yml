@@ -15,8 +15,8 @@ jobs:
       contents: write
       actions: write
     
-    # 设置超时时间为20分钟 (包含邮箱验证码获取时间)
-    timeout-minutes: 20
+    # 设置超时时间为15分钟 (包含邮箱验证码获取时间)
+    timeout-minutes: 15
     
     steps:
     - name: 🔄 检出代码
@@ -62,13 +62,12 @@ jobs:
         # 以下变量由系统和脚本自动处理：
         # - GITHUB_ACTIONS: GitHub自动设置为"true"
         # - USE_HEADLESS: main.py检测到GITHUB_ACTIONS时自动启用无头模式
-        # - VERIFICATION_TIMEOUT: main.py默认180秒超时
+        # - 验证码等待时间: main.py中设定为30秒
       run: |
         echo "🚀 启动XServer GAME完全自动化登录流程..."
         echo "📧 XServer邮箱: $XSERVER_EMAIL"
         echo "📮 验证邮箱: $WEBMAIL_USERNAME@zmkk.edu.kg"
         echo "🤖 运行环境: GitHub Actions (自动无头模式)"
-        echo "⏰ 验证码获取超时: 180秒"
         echo "📂 工作目录: $(pwd)"
         echo "🐍 Python版本: $(python --version)"
         echo "🎭 浏览器引擎: Playwright (Chromium)"
@@ -98,4 +97,4 @@ jobs:
         GITHUB_TOKEN: ${{ github.token }}
       with:
         repository: ${{ github.repository }}
-        older-than-seconds: 172800  # 删除2天前的记录
+        older-than-seconds: 3600  # 删除1小时前的记录
