@@ -404,27 +404,42 @@ class XServerAutoLogin:
         try:
             print(f"🔑 正在输入外部获取的验证码: {verification_code}")
             
+            # 等待页面稳定
+            time.sleep(2)
+            
             # 查找验证码输入框
             code_input = self.driver.find_element(By.XPATH, "//input[@id='auth_code'][@name='auth_code']")
             
             # 清空并输入验证码
             code_input.clear()
+            time.sleep(1)  # 等待清空完成
             self.human_type(code_input, verification_code)
             print("✅ 验证码已输入")
+            
+            # 等待输入完成
+            time.sleep(2)
             
             # 查找并点击登录按钮
             print("🔍 正在查找ログイン按钮...")
             login_submit_button = self.driver.find_element(By.XPATH, "//input[@type='submit'][@value='ログイン']")
             print("✅ 找到ログイン按钮")
+            
+            # 等待按钮可点击
+            time.sleep(1)
             login_submit_button.click()
             print("✅ 验证码已提交")
             
             # 等待验证结果
-            time.sleep(5)
+            time.sleep(8)  # 增加等待时间
             return True
             
         except Exception as e:
             print(f"❌ 输入验证码失败: {e}")
+            # 尝试截图保存现场
+            try:
+                self.take_screenshot("verification_input_failed")
+            except:
+                pass
             return False
     
     
