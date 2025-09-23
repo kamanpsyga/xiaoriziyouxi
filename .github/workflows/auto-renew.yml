@@ -1,16 +1,10 @@
-name: XServer GAME 完全自动化登录
+name: XServer GAME 自动登录 (Playwright)
 
 on:
   schedule:
-    # 每8小时运行一次 (UTC时间: 0:00, 8:00, 16:00)
-    - cron: '0 */8 * * *'
+    # 每天北京时间22:45运行 (UTC时间: 14:45)
+    - cron: '45 14 * * *'
   workflow_dispatch:  # 允许手动触发
-    inputs:
-      debug_mode:
-        description: '启用调试模式 (保留更多日志)'
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   auto-login:
@@ -38,7 +32,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: 🎭 安装 Chrome 浏览器和日文字体
+    - name: 🎭 安装 Playwright 浏览器
+      run: |
+        playwright install chromium
+        
+    - name: 🎌 安装日文字体支持
       run: |
         # 更新包列表
         sudo apt-get update
@@ -46,28 +44,20 @@ jobs:
         # 安装日文字体包，支持日文显示
         sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
         
-        # 安装Chrome浏览器 (undetected-chromedriver会自动管理驱动)
-        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
-        
         # 验证字体安装
         echo "📝 已安装的日文字体："
         fc-list | grep -i "noto.*cjk" | head -5
         
     - name: 🚀 运行 XServer 完全自动化登录
       env:
-        # XServer 登录凭据 (main.py会自动读取这些环境变量)
+        # XServer 登录凭据 (main.py自动读取)
         XSERVER_EMAIL: ${{ secrets.XSERVER_EMAIL }}
         XSERVER_PASSWORD: ${{ secrets.XSERVER_PASSWORD }}
         
-        # 邮箱验证码获取凭据 (main.py会自动读取这些环境变量)
+        # 邮箱验证码获取凭据 (main.py内置邮箱功能自动读取)
         WEBMAIL_USERNAME: ${{ secrets.WEBMAIL_USERNAME }}
         WEBMAIL_PASSWORD: ${{ secrets.WEBMAIL_PASSWORD }}
         
-        # 调试模式设置
-        DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
         
         # 以下变量由系统和脚本自动处理：
         # - GITHUB_ACTIONS: GitHub自动设置为"true"
@@ -79,17 +69,18 @@ jobs:
         echo "📮 验证邮箱: $WEBMAIL_USERNAME@zmkk.edu.kg"
         echo "🤖 运行环境: GitHub Actions (自动无头模式)"
         echo "⏰ 验证码获取超时: 180秒"
-        echo "🐛 调试模式: $DEBUG_MODE"
         echo "📂 工作目录: $(pwd)"
         echo "🐍 Python版本: $(python --version)"
+        echo "🎭 浏览器引擎: Playwright (Chromium)"
         echo ""
         
-        # 检查必要的脚本文件
-        echo "📋 检查脚本文件："
-        ls -la *.py
+        # 检查主脚本文件
+        echo "📋 检查主脚本文件："
+        ls -la main.py
         echo ""
         
-        # 运行主控脚本，实现login.py和code.py的完全自动化联动
+        # 运行单一主脚本，包含完整的登录和验证码获取功能
+        # 基于Playwright + stealth 实现完全自动化
         python main.py
         
     - name: 📸 上传运行结果
@@ -99,29 +90,8 @@ jobs:
         name: xserver-auto-login-results-${{ github.run_number }}
         path: |
           *.png
-          *.log
-          *.txt
         retention-days: 7  # 保留7天
         
-    - name: 📋 显示运行结果
-      if: always()
-      run: |
-        echo "=== XServer GAME 完全自动化登录任务完成 ==="
-        echo ""
-        echo "📸 生成的截图文件："
-        ls -la *.png 2>/dev/null || echo "   无截图文件"
-        echo ""
-        echo "📋 生成的日志文件："
-        ls -la *.log 2>/dev/null || echo "   无日志文件"
-        echo ""
-        echo "📄 生成的文本文件："
-        ls -la *.txt 2>/dev/null || echo "   无文本文件"
-        echo ""
-        echo "🔍 main.py执行退出码: $?"
-        echo ""
-        echo "📁 完整工作目录内容："
-        ls -la
-
     - name: 🧹 清理旧的工作流运行记录
       uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
       env:
