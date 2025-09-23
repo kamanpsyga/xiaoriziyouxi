@@ -77,6 +77,11 @@ class XServerAutoLogin:
         self.tab_1_xserver = None    # 标签页#1 - XServer登录页面
         self.tab_2_backup = None     # 标签页#2 - 备用标签页（邮箱登录用）
         self.current_active_tab = 1  # 当前活跃标签页编号
+        
+        # 续期状态跟踪
+        self.old_expiry_time = None      # 原到期时间
+        self.new_expiry_time = None      # 新到期时间
+        self.renewal_status = "Unknown"  # 续期状态: Success/Unexpired/Failed/Unknown
     
     def get_active_page(self):
         """根据当前活跃标签页编号获取页面"""
@@ -122,10 +127,7 @@ class XServerAutoLogin:
                 '--disable-notifications',
                 '--window-size=1920,1080',
                 '--lang=ja-JP',
-                '--accept-lang=ja-JP,ja,en-US,en',
-                '--font-render-hinting=none',
-                '--disable-font-subpixel-positioning',
-                '--force-device-scale-factor=1'
+                '--accept-lang=ja-JP,ja,en-US,en'
             ]
             
             # 启动浏览器
@@ -984,7 +986,7 @@ class XServerAutoLogin:
             return False
     
     # =================================================================
-    #                       6. 服务器信息获取模块
+    #                    6A. 服务器信息获取模块
     # =================================================================
     
     async def get_server_time_info(self):
@@ -1027,6 +1029,8 @@ class XServerAutoLogin:
                             expiry_raw = expiry_match.group(1)
                             expiry_formatted = self.format_expiry_date(expiry_raw)
                             print(f"📅 到期时间: {expiry_formatted}")
+                            # 记录原到期时间
+                            self.old_expiry_time = expiry_formatted
                         
                         break
                         
@@ -1048,6 +1052,10 @@ class XServerAutoLogin:
         """格式化到期时间"""
         # 直接返回日期，移除括号和"まで"
         return date_str  # 例如: "2025-09-24"
+    
+    # =================================================================
+    #                    6B. 续期页面导航模块
+    # =================================================================
     
     async def click_upgrade_button(self):
         """点击升级延长按钮"""
@@ -1108,12 +1116,308 @@ class XServerAutoLogin:
                 restriction_text = await element.text_content()
                 print(f"✅ 找到期限延长限制信息")
                 print(f"📝 限制信息: {restriction_text}")
+                # 设置状态为未到期
+                self.renewal_status = "Unexpired"
+                return True  # 有限制，不能续期
                 
             except Exception:
-                print("ℹ️ 未找到期限延长限制信息，可能可以进行延长操作")
+                print("ℹ️ 未找到期限延长限制信息，可以进行延长操作")
+                # 没有限制信息，执行续期操作
+                await self.perform_extension_operation()
+                return False  # 无限制，可以续期
                 
         except Exception as e:
             print(f"❌ 检测期限延长限制失败: {e}")
+            return True  # 出错时默认认为有限制
+    
+    # =================================================================
+    #                    6C. 续期操作执行模块
+    # =================================================================
+    
+    async def perform_extension_operation(self):
+        """执行期限延长操作"""
+        try:
+            print("🔄 开始执行期限延长操作...")
+            
+            # 查找"期限を延長する"按钮
+            await self.click_extension_button()
+            
+        except Exception as e:
+            print(f"❌ 执行期限延长操作失败: {e}")
+    
+    async def click_extension_button(self):
+        """点击期限延长按钮"""
+        try:
+            print("🔍 正在查找'期限を延長する'按钮...")
+            
+            active_page = self.get_active_page()
+            
+            # 使用有效的选择器
+            extension_selector = "a:has-text('期限を延長する')"
+            
+            # 等待并点击按钮
+            await active_page.wait_for_selector(extension_selector, timeout=self.wait_timeout)
+            print("✅ 找到'期限を延長する'按钮")
+            
+            # 点击按钮
+            await active_page.click(extension_selector)
+            print("✅ 已点击'期限を延長する'按钮")
+            
+            # 等待页面跳转
+            print("⏰ 等待页面跳转...")
+            await asyncio.sleep(5)
+            
+            # 验证是否跳转到input页面
+            await self.verify_extension_input_page()
+            return True
+            
+        except Exception as e:
+            print(f"❌ 点击期限延长按钮失败: {e}")
+            return False
+    
+    async def verify_extension_input_page(self):
+        """验证是否成功跳转到期限延长输入页面"""
+        try:
+            active_page = self.get_active_page()
+            current_url = active_page.url
+            expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/input"
+            
+            print(f"📍 当前页面URL: {current_url}")
+            
+            if expected_url in current_url:
+                print("🎉 成功跳转到期限延长输入页面！")
+                await self.take_screenshot("extension_input_page")
+                
+                # 继续执行确认操作
+                await self.click_confirmation_button()
+                return True
+            else:
+                print(f"❌ 页面跳转失败")
+                print(f"   预期URL: {expected_url}")
+                print(f"   实际URL: {current_url}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 验证期限延长输入页面失败: {e}")
+            return False
+    
+    async def click_confirmation_button(self):
+        """点击確認画面に進む按钮"""
+        try:
+            print("🔍 正在查找'確認画面に進む'按钮...")
+            
+            active_page = self.get_active_page()
+            
+            # 使用button元素的选择器
+            confirmation_selector = "button[type='submit']:has-text('確認画面に進む')"
+            
+            # 等待并点击按钮
+            await active_page.wait_for_selector(confirmation_selector, timeout=self.wait_timeout)
+            print("✅ 找到'確認画面に進む'按钮")
+            
+            # 点击按钮
+            await active_page.click(confirmation_selector)
+            print("✅ 已点击'確認画面に進む'按钮")
+            
+            # 等待页面跳转
+            print("⏰ 等待页面跳转...")
+            await asyncio.sleep(5)
+            
+            # 验证是否跳转到conf页面
+            await self.verify_extension_conf_page()
+            return True
+            
+        except Exception as e:
+            print(f"❌ 点击確認画面に進む按钮失败: {e}")
+            return False
+    
+    async def verify_extension_conf_page(self):
+        """验证是否成功跳转到期限延长确认页面"""
+        try:
+            active_page = self.get_active_page()
+            current_url = active_page.url
+            expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/conf"
+            
+            print(f"📍 当前页面URL: {current_url}")
+            
+            if expected_url in current_url:
+                print("🎉 成功跳转到期限延长确认页面！")
+                await self.take_screenshot("extension_conf_page")
+                
+                # 记录续期后的时间信息
+                await self.record_extension_time()
+                
+                # 查找期限延长按钮
+                await self.find_final_extension_button()
+                
+                return True
+            else:
+                print(f"❌ 页面跳转失败")
+                print(f"   预期URL: {expected_url}")
+                print(f"   实际URL: {current_url}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 验证期限延长确认页面失败: {e}")
+            return False
+    
+    async def record_extension_time(self):
+        """记录续期后的时间信息"""
+        try:
+            print("📅 正在获取续期后的时间信息...")
+            
+            active_page = self.get_active_page()
+            
+            # 使用有效的选择器
+            time_selector = "tr:has(th:has-text('延長後の期限'))"
+            
+            # 等待并获取时间信息
+            time_element = await active_page.wait_for_selector(time_selector, timeout=self.wait_timeout)
+            print("✅ 找到续期后时间信息")
+            
+            # 获取整行，然后提取td内容
+            td_element = await time_element.query_selector("td")
+            if td_element:
+                extension_time = await td_element.text_content()
+                extension_time = extension_time.strip()
+                print(f"📅 续期后的期限: {extension_time}")
+                # 记录新到期时间
+                self.new_expiry_time = extension_time
+            else:
+                print("❌ 未找到时间内容")
+            
+        except Exception as e:
+            print(f"❌ 记录续期后时间失败: {e}")
+    
+    async def find_final_extension_button(self):
+        """查找并点击最终的期限延长按钮"""
+        try:
+            print("🔍 正在查找最终的'期限を延長する'按钮...")
+            
+            active_page = self.get_active_page()
+            
+            # 基于HTML属性查找按钮
+            final_button_selector = "button[type='submit']:has-text('期限を延長する')"
+            
+            # 等待按钮出现
+            await active_page.wait_for_selector(final_button_selector, timeout=self.wait_timeout)
+            print("✅ 找到最终的'期限を延長する'按钮")
+            
+            # 点击按钮执行最终续期
+            await active_page.click(final_button_selector)
+            print("✅ 已点击最终续期按钮")
+            
+            # 等待页面跳转
+            print("⏰ 等待续期操作完成...")
+            await asyncio.sleep(5)
+            
+            # 验证续期结果
+            await self.verify_extension_success()
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 执行最终期限延长操作失败: {e}")
+            return False
+    
+    async def verify_extension_success(self):
+        """验证续期操作是否成功"""
+        try:
+            print("🔍 正在验证续期操作结果...")
+            
+            active_page = self.get_active_page()
+            current_url = active_page.url
+            expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/do"
+            
+            print(f"📍 当前页面URL: {current_url}")
+            
+            # 检查条件1：URL是否跳转到do页面
+            url_success = expected_url in current_url
+            
+            # 检查条件2：是否有成功提示文字
+            text_success = False
+            try:
+                success_text_selector = "p:has-text('期限を延長しました。')"
+                await active_page.wait_for_selector(success_text_selector, timeout=5000)
+                success_text = await active_page.query_selector(success_text_selector)
+                if success_text:
+                    text_content = await success_text.text_content()
+                    print(f"✅ 找到成功提示文字: {text_content.strip()}")
+                    text_success = True
+            except Exception:
+                print("ℹ️ 未找到成功提示文字")
+            
+            # 任意一项满足即为成功
+            if url_success or text_success:
+                print("🎉 续期操作成功！")
+                if url_success:
+                    print(f"✅ URL验证成功: {current_url}")
+                if text_success:
+                    print("✅ 成功提示文字验证成功")
+                
+                # 设置状态为成功
+                self.renewal_status = "Success"
+                await self.take_screenshot("extension_success")
+                return True
+            else:
+                print("❌ 续期操作可能失败")
+                print(f"   当前URL: {current_url}")
+                print(f"   期望URL: {expected_url}")
+                # 设置状态为失败
+                self.renewal_status = "Failed"
+                await self.take_screenshot("extension_failed")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 验证续期结果失败: {e}")
+            # 设置状态为失败
+            self.renewal_status = "Failed"
+            return False
+    
+    # =================================================================
+    #                    6D. 结果记录与报告模块
+    # =================================================================
+    
+    def generate_readme(self):
+        """生成README.md文件记录续期情况"""
+        try:
+            print("📝 正在生成README.md文件...")
+            
+            # 获取当前时间
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 根据状态生成不同的内容
+            readme_content = f"**最后运行时间**: `{current_time}`\n\n"
+            readme_content += "**运行结果**: <br>\n"
+            readme_content += "🖥️服务器：`🇯🇵Xserver(Mc)`<br>\n"
+            
+            # 根据续期状态生成对应的结果
+            if self.renewal_status == "Success":
+                readme_content += "📊续期结果：✅Success<br>\n"
+                readme_content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
+                readme_content += f"🕡️新到期时间: `{self.new_expiry_time or 'Unknown'}`<br>\n"
+            elif self.renewal_status == "Unexpired":
+                readme_content += "📊续期结果：ℹ️Unexpired<br>\n"
+                readme_content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
+            elif self.renewal_status == "Failed":
+                readme_content += "📊续期结果：❌Failed<br>\n"
+                readme_content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
+            else:
+                readme_content += "📊续期结果：❓Unknown<br>\n"
+                readme_content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
+            
+            # 写入README.md文件
+            with open("README.md", "w", encoding="utf-8") as f:
+                f.write(readme_content)
+            
+            print("✅ README.md文件生成成功")
+            print(f"📄 续期状态: {self.renewal_status}")
+            print(f"📅 原到期时间: {self.old_expiry_time or 'Unknown'}")
+            if self.new_expiry_time:
+                print(f"📅 新到期时间: {self.new_expiry_time}")
+            
+        except Exception as e:
+            print(f"❌ 生成README.md文件失败: {e}")
     
     # =================================================================
     #                       7. 主流程控制模块
@@ -1158,6 +1462,9 @@ class XServerAutoLogin:
             print("🎉 XServer GAME 自动登录流程完成！")
             await self.take_screenshot("login_completed")
             
+            # 生成README.md文件
+            self.generate_readme()
+            
             # 保持浏览器打开一段时间以便查看结果
             print("⏰ 浏览器将在 30 秒后关闭...")
             await asyncio.sleep(30)
@@ -1166,6 +1473,8 @@ class XServerAutoLogin:
             
         except Exception as e:
             print(f"❌ 自动登录流程出错: {e}")
+            # 即使出错也生成README文件
+            self.generate_readme()
             return False
         
         finally:
