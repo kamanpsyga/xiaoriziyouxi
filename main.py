@@ -8,6 +8,7 @@ import asyncio
 import time
 import re
 import datetime
+from datetime import timezone, timedelta
 import os
 from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
 from playwright_stealth import stealth_async
@@ -162,7 +163,9 @@ class XServerAutoLogin:
             active_page = self.get_active_page()
             if active_page:
                 self.screenshot_count += 1
-                timestamp = datetime.datetime.now().strftime("%H%M%S")
+                # 使用北京时间（UTC+8）
+                beijing_time = datetime.datetime.now(timezone(timedelta(hours=8)))
+                timestamp = beijing_time.strftime("%H%M%S")
                 filename = f"step_{self.screenshot_count:02d}_{timestamp}_{step_name}.png"
                 
                 # 确保文件名安全
@@ -1382,7 +1385,9 @@ class XServerAutoLogin:
             print("📝 正在生成README.md文件...")
             
             # 获取当前时间
-            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 使用北京时间（UTC+8）
+            beijing_time = datetime.datetime.now(timezone(timedelta(hours=8)))
+            current_time = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
             
             # 根据状态生成不同的内容
             readme_content = f"**最后运行时间**: `{current_time}`\n\n"
