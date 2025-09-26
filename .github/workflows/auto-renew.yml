@@ -88,7 +88,7 @@ jobs:
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         git add README.md
-        git diff --staged --quiet || git commit -m "📊 自动更新续期状态报告 [$(date '+%Y-%m-%d %H:%M:%S')]"
+        git diff --staged --quiet || git commit -m "📊 自动更新续期状态报告 [$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')]"
         git push
         
     - name: 📱 发送Telegram通知
@@ -113,7 +113,7 @@ jobs:
         
         # 构建通知消息
         MESSAGE="🐢Xserver续期通知
-        📅执行时间：$(date '+%Y-%m-%d %H:%M:%S')
+        📅执行时间：$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
         
         🖥️服务器：🇯🇵Xserver(Mc)
         📊续期结果：${RENEWAL_STATUS}
