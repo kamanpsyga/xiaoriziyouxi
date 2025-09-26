@@ -18,17 +18,17 @@ from playwright_stealth import stealth_async
 # =====================================================================
 
 # XServer登录信息配置 (支持环境变量)
-LOGIN_EMAIL = os.getenv("XSERVER_EMAIL", "faiz555@zmkk.edu.kg")  # 请替换为您的邮箱
-LOGIN_PASSWORD = os.getenv("XSERVER_PASSWORD", "faiz555!!")        # 请替换为您的密码
+LOGIN_EMAIL = os.getenv("XSERVER_EMAIL", "")  # 请替换为您的邮箱
+LOGIN_PASSWORD = os.getenv("XSERVER_PASSWORD", "")        # 请替换为您的密码
 
 # 网站配置
 TARGET_URL = "https://secure.xserver.ne.jp/xapanel/login/xmgame"
 
 # 邮箱验证码获取配置
 WEBMAIL_URL = "https://zmkk.edu.kg/login"  # 网页邮箱地址
-WEBMAIL_USERNAME = os.getenv("WEBMAIL_USERNAME", "kaixa913")  # 邮箱登录用户名
-WEBMAIL_PASSWORD = os.getenv("WEBMAIL_PASSWORD", "kaixa913!!")  # 邮箱密码
-TARGET_EMAIL = "faiz555@zmkk.edu.kg"  # 要选择的目标邮箱
+WEBMAIL_USERNAME = os.getenv("WEBMAIL_USERNAME", "")  # 邮箱登录用户名
+WEBMAIL_PASSWORD = os.getenv("WEBMAIL_PASSWORD", "")  # 邮箱密码
+TARGET_EMAIL = os.getenv("TARGET_EMAIL", "")  # 要选择的目标邮箱
 
 # 浏览器配置 (GitHub Actions中自动启用无头模式)
 IS_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
