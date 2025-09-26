@@ -868,7 +868,7 @@ class XServerAutoLogin:
                     print(f"❌ 查找或点击ゲーム管理按钮时出错: {e}")
                     await self.take_screenshot("game_button_error")
                 
-                    return True
+                return True
             else:
                 print(f"❌ 登录失败！当前URL不是预期的成功页面")
                 print(f"   预期URL: {success_url}")
@@ -1362,8 +1362,8 @@ class XServerAutoLogin:
             self.generate_readme()
             
             # 保持浏览器打开一段时间以便查看结果
-            print("⏰ 浏览器将在 30 秒后关闭...")
-            await asyncio.sleep(30)
+            print("⏰ 浏览器将在 10 秒后关闭...")
+            await asyncio.sleep(10)
             
             return True
             
