@@ -57,6 +57,7 @@ jobs:
         # 邮箱验证码获取凭据 (main.py内置邮箱功能自动读取)
         WEBMAIL_USERNAME: ${{ secrets.WEBMAIL_USERNAME }}
         WEBMAIL_PASSWORD: ${{ secrets.WEBMAIL_PASSWORD }}
+        TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
         
         
         # 以下变量由系统和脚本自动处理：
