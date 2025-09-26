@@ -274,17 +274,17 @@ class XServerAutoLogin:
             # 查找邮箱输入框
             email_selector = "input[name='memberid']"
             await active_page.wait_for_selector(email_selector, timeout=self.wait_timeout)
-            print("✅ 找到邮箱输入框: input[name='memberid']")
-            
+            print("✅ 找到邮箱输入框")
+
             # 查找密码输入框
             password_selector = "input[name='user_password']"
             await active_page.wait_for_selector(password_selector, timeout=self.wait_timeout)
-            print("✅ 找到密码输入框: input[name='user_password']")
-            
+            print("✅ 找到密码输入框")
+
             # 查找登录按钮
             login_button_selector = "input[value='ログインする']"
             await active_page.wait_for_selector(login_button_selector, timeout=self.wait_timeout)
-            print("✅ 找到登录按钮: input[value='ログインする']")
+            print("✅ 找到登录按钮")
             
             return email_selector, password_selector, login_button_selector
             
@@ -371,22 +371,17 @@ class XServerAutoLogin:
                 print("⚠️ 这是XServer的安全机制，检测到新环境登录")
                 
                 # 查找发送验证码按钮
-                send_code_selectors = [
-                    "input[value*='送信']",
-                    "input[value*='認証コードを送信']",
-                    "button:has-text('送信')",
-                    ".button:has-text('送信')"
-                ]
+                print("🔍 正在查找发送验证码按钮...")
+                selector = "input[value*='送信']"
                 
-                for selector in send_code_selectors:
-                    try:
-                        await active_page.wait_for_selector(selector, timeout=5000)
-                        print("✅ 找到发送验证码按钮")
-                        print("📧 已点击发送验证码按钮，验证码正在发送到您的邮箱")
-                        await active_page.click(selector)
-                        break
-                    except:
-                        continue
+                try:
+                    await active_page.wait_for_selector(selector, timeout=self.wait_timeout)
+                    print("✅ 找到发送验证码按钮")
+                    print("📧 已点击发送验证码按钮，验证码正在发送到您的邮箱")
+                    await active_page.click(selector)
+                except Exception as e:
+                    print(f"❌ 查找发送验证码按钮失败: {e}")
+                    return False
                 
                 # 等待跳转到验证码输入页面
                 await asyncio.sleep(5)
@@ -430,36 +425,6 @@ class XServerAutoLogin:
                         
                         # 自动获取验证码
                         verification_code = await self.get_verification_code_from_email()
-                        
-                        if verification_code:
-                            # 输入验证码
-                            await active_page.fill(code_input_selector, "")
-                            await self.human_type(code_input_selector, verification_code)
-                            print("✅ 验证码已输入")
-                            
-                            # 等待输入完成
-                            await asyncio.sleep(2)
-                            
-                            # 查找并点击登录按钮
-                            print("🔍 正在查找ログイン按钮...")
-                            login_submit_selector = "input[type='submit'][value='ログイン']"
-                            await active_page.wait_for_selector(login_submit_selector, timeout=self.wait_timeout)
-                            print("✅ 找到ログイン按钮")
-                            
-                            # 等待按钮可点击
-                            await asyncio.sleep(1)
-                            await active_page.click(login_submit_selector)
-                            print("✅ 验证码已提交")
-                            
-                            # 等待验证结果
-                            await asyncio.sleep(8)
-                            return True
-                        else:
-                            print("❌ 自动获取验证码失败")
-                            return False
-                    
-                    print("🔑 请手动输入验证码...")
-                    verification_code = input("请输入收到的验证码: ").strip()
                     
                     if verification_code:
                         # 输入验证码
@@ -485,16 +450,16 @@ class XServerAutoLogin:
                         await asyncio.sleep(8)
                         return True
                     else:
-                        print("❌ 验证码不能为空")
+                        print("❌ 自动获取验证码失败")
                         return False
-                        
+                
                 except Exception as e:
                     print(f"❌ 未找到验证码输入框: {e}")
                     return False
             else:
                 print("⚠️ 未检测到验证码输入页面，可能已直接登录成功")
                 return True
-                
+            
         except Exception as e:
             print(f"❌ 处理验证码输入页面时出错: {e}")
             return False
@@ -597,7 +562,7 @@ class XServerAutoLogin:
             # 查找邮箱输入框
             try:
                 await active_page.wait_for_selector(email_selector, timeout=self.wait_timeout)
-                print(f"✅ 找到邮箱输入框: {email_selector}")
+                print("✅ 找到邮箱输入框")
             except:
                 print("❌ 未找到邮箱输入框")
                 return False
@@ -605,7 +570,7 @@ class XServerAutoLogin:
             # 查找密码输入框
             try:
                 await active_page.wait_for_selector(password_selector, timeout=self.wait_timeout)
-                print(f"✅ 找到密码输入框: {password_selector}")
+                print("✅ 找到密码输入框")
             except:
                 print("❌ 未找到密码输入框")
                 return False
@@ -613,7 +578,7 @@ class XServerAutoLogin:
             # 查找登录按钮
             try:
                 await active_page.wait_for_selector(login_selector, timeout=self.wait_timeout)
-                print(f"✅ 找到登录按钮: {login_selector}")
+                print("✅ 找到登录按钮")
             except:
                 print("❌ 未找到登录按钮")
                 return False
@@ -670,7 +635,7 @@ class XServerAutoLogin:
         except Exception as e:
             print(f"❌ 邮箱登录过程出错: {e}")
             return False
-    
+            
     async def human_type_in_tab(self, page, selector, text):
         """在指定标签页中模拟人类输入行为"""
         for char in text:
@@ -681,62 +646,22 @@ class XServerAutoLogin:
         """在标签页#2中选择目标邮箱"""
         try:
             print("📧 正在选择目标邮箱...")
-            print(f"🔐 登录邮箱: {self.webmail_username}")
-            print(f"🎯 目标邮箱: {self.target_email}")
             
             active_page = self.get_active_page()
             
             # 等待邮箱列表加载
             await asyncio.sleep(3)
             
-            # 基于HTML结构，使用更精确的选择器
-            target_selectors = [
-                f"div.account:has-text('{self.target_email}')",  # 基于class="account"的div
-                f".account:has-text('{self.target_email}')",  # class="account"的元素
-                f"div:has-text('{self.target_email}')",  # 任何包含目标邮箱的div
-                f":has-text('{self.target_email}')",  # 任何包含目标邮箱的元素
-                f"[data-v]:has-text('{self.target_email}')"  # 带data-v属性的元素
-            ]
+            # 使用有效的选择器
+            selector = f"div.account:has-text('{self.target_email}')"
             
-            for i, selector in enumerate(target_selectors):
-                try:
-                    print(f"🔍 尝试选择器 {i+1}: {selector}")
-                    
-                    # 等待元素出现
-                    elements = await active_page.locator(selector).all()
-                    if elements:
-                        print(f"   ✅ 找到 {len(elements)} 个匹配元素")
-                        
-                        # 点击第一个匹配的元素
-                        await elements[0].click()
-                        print(f"✅ 找到目标邮箱: {self.target_email}")
-                        print(f"✅ 已选择 {self.target_email} 邮箱")
-                        return True
-                    else:
-                        print(f"   ❌ 未找到匹配元素")
-                    
-                except Exception as selector_error:
-                    print(f"   ❌ 选择器 {i+1} 失败: {selector_error}")
-                    continue
+            # 等待并点击目标邮箱
+            await active_page.wait_for_selector(selector, timeout=self.wait_timeout)
+            await active_page.locator(selector).first.click()
             
-            print("❌ 所有选择器都未找到目标邮箱")
+            print(f"✅ 已选择 {self.target_email} 邮箱")
+            return True
             
-            # 调试：显示页面上所有可能的邮箱元素（完全按照code.py）
-            try:
-                print("🔍 调试：页面上的邮箱相关元素...")
-                elements = await active_page.locator("div.account, .account").all()
-                print(f"   找到 {len(elements)} 个account元素:")
-                for i, element in enumerate(elements):
-                    try:
-                        element_text = await element.text_content()
-                        print(f"   元素{i+1}: '{element_text.strip()}'")
-                    except:
-                        print(f"   元素{i+1}: [无法获取文本]")
-            except Exception as debug_error:
-                print(f"   调试信息获取失败: {debug_error}")
-            
-            return False
-                
         except Exception as e:
             print(f"❌ 选择目标邮箱失败: {e}")
             return False
@@ -764,7 +689,7 @@ class XServerAutoLogin:
         except Exception as e:
             print(f"❌ 滚动加载邮件失败: {e}")
             return False
-    
+            
     async def search_verification_email_in_tab2(self):
         """在标签页#2中搜索XServer验证码邮件"""
         try:
@@ -775,57 +700,25 @@ class XServerAutoLogin:
             # 滚动加载邮件
             await self.scroll_to_load_emails_in_tab2()
             
+            # 使用有效的选择器查找邮件
+            selector = "text=/【XServerアカウント】ログイン用認証コードのお知らせ/"
+            
             # 查找XServer邮件
-            xserver_selectors = [
-                "text=/【XServerアカウント】ログイン用認証コードのお知らせ/",
-                ":has-text('XServerアカウント')",
-                ":has-text('認証コード')"
-            ]
-            
-            xserver_emails = []
-            
-            for selector in xserver_selectors:
-                try:
-                    elements = await active_page.locator(selector).all()
-                    if elements:
-                        print(f"✅ 使用选择器找到 {len(elements)} 封邮件: {selector}")
-                        xserver_emails = elements
-                        break
-                except:
-                    continue
+            xserver_emails = await active_page.locator(selector).all()
             
             if not xserver_emails:
                 print("❌ 未找到XServer验证码邮件")
                 return False
             
-            print(f"📊 统计结果:")
-            print(f"   🎯 总共找到: {len(xserver_emails)} 封XServerアカウント邮件")
-            print(f"   ✅ 有效选择器: 1 个")
-            
-            # 显示邮件列表（完全按照code.py）
-            print(f"   📧 邮件列表:")
-            for i, email in enumerate(xserver_emails[:10]):  # 只显示前10封
-                try:
-                    email_text = await email.text_content()
-                    email_preview = email_text[:80] + "..." if len(email_text) > 80 else email_text
-                    print(f"      {i+1}. ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ {email_preview}")
-                except:
-                    print(f"      {i+1}. [无法获取邮件预览]")
-            
-            if len(xserver_emails) > 10:
-                print(f"      ... 还有 {len(xserver_emails) - 10} 封邮件")
+            print(f"✅ 找到 {len(xserver_emails)} 封XServer验证码邮件")
             
             # 点击第一封（最新的）邮件
-            print("🎯 正在打开第一封（最新的）XServerアカウント邮件...")
-            try:
-                await xserver_emails[0].click()
-                await asyncio.sleep(3)
-                print("✅ 已成功打开最新的XServerアカウント邮件")
-                return True
-            except Exception as e:
-                print(f"❌ 点击邮件失败: {e}")
-                return False
-                
+            print("🎯 正在打开最新的验证码邮件...")
+            await xserver_emails[0].click()
+            await asyncio.sleep(3)
+            print("✅ 已成功打开最新的验证码邮件")
+            return True
+            
         except Exception as e:
             print(f"❌ 搜索验证码邮件失败: {e}")
             return False
@@ -975,7 +868,7 @@ class XServerAutoLogin:
                     print(f"❌ 查找或点击ゲーム管理按钮时出错: {e}")
                     await self.take_screenshot("game_button_error")
                 
-                return True
+                    return True
             else:
                 print(f"❌ 登录失败！当前URL不是预期的成功页面")
                 print(f"   预期URL: {success_url}")
@@ -985,7 +878,7 @@ class XServerAutoLogin:
         except Exception as e:
             print(f"❌ 检查登录结果时出错: {e}")
             return False
-    
+            
     # =================================================================
     #                    6A. 服务器信息获取模块
     # =================================================================
@@ -1197,11 +1090,11 @@ class XServerAutoLogin:
                 print(f"   预期URL: {expected_url}")
                 print(f"   实际URL: {current_url}")
                 return False
-                
+            
         except Exception as e:
             print(f"❌ 验证期限延长输入页面失败: {e}")
             return False
-    
+            
     async def click_confirmation_button(self):
         """点击確認画面に進む按钮"""
         try:
@@ -1231,7 +1124,7 @@ class XServerAutoLogin:
         except Exception as e:
             print(f"❌ 点击確認画面に進む按钮失败: {e}")
             return False
-    
+            
     async def verify_extension_conf_page(self):
         """验证是否成功跳转到期限延长确认页面"""
         try:
@@ -1257,7 +1150,7 @@ class XServerAutoLogin:
                 print(f"   预期URL: {expected_url}")
                 print(f"   实际URL: {current_url}")
                 return False
-                
+            
         except Exception as e:
             print(f"❌ 验证期限延长确认页面失败: {e}")
             return False
@@ -1320,7 +1213,7 @@ class XServerAutoLogin:
         except Exception as e:
             print(f"❌ 执行最终期限延长操作失败: {e}")
             return False
-    
+            
     async def verify_extension_success(self):
         """验证续期操作是否成功"""
         try:
@@ -1368,13 +1261,13 @@ class XServerAutoLogin:
                 self.renewal_status = "Failed"
                 await self.take_screenshot("extension_failed")
                 return False
-                
+            
         except Exception as e:
             print(f"❌ 验证续期结果失败: {e}")
             # 设置状态为失败
             self.renewal_status = "Failed"
             return False
-    
+        
     # =================================================================
     #                    6D. 结果记录与报告模块
     # =================================================================
@@ -1479,7 +1372,7 @@ class XServerAutoLogin:
             # 即使出错也生成README文件
             self.generate_readme()
             return False
-        
+    
         finally:
             await self.cleanup()
 
