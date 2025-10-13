@@ -4,12 +4,18 @@
 XServer GAME 自动登录和续期脚本
 """
 
+# =====================================================================
+#                          导入依赖
+# =====================================================================
+
 import asyncio
 import time
 import re
 import datetime
 from datetime import timezone, timedelta
 import os
+import json
+import requests
 from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
 from playwright_stealth import stealth_async
 
@@ -17,27 +23,46 @@ from playwright_stealth import stealth_async
 #                          配置区域
 # =====================================================================
 
-# XServer登录信息配置 (支持环境变量)
-LOGIN_EMAIL = os.getenv("XSERVER_EMAIL", "")  # 请替换为您的邮箱
-LOGIN_PASSWORD = os.getenv("XSERVER_PASSWORD", "")        # 请替换为您的密码
-
-# 网站配置
-TARGET_URL = "https://secure.xserver.ne.jp/xapanel/login/xmgame"
-
-# 邮箱验证码获取配置
-WEBMAIL_URL = "https://zmkk.edu.kg/login"  # 网页邮箱地址
-WEBMAIL_USERNAME = os.getenv("WEBMAIL_USERNAME", "")  # 邮箱登录用户名
-WEBMAIL_PASSWORD = os.getenv("WEBMAIL_PASSWORD", "")  # 邮箱密码
-TARGET_EMAIL = os.getenv("TARGET_EMAIL", "")  # 要选择的目标邮箱
-
-# 浏览器配置 (GitHub Actions中自动启用无头模式)
+# 浏览器配置
 IS_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 USE_HEADLESS = IS_GITHUB_ACTIONS or os.getenv("USE_HEADLESS", "false").lower() == "true"
 WAIT_TIMEOUT = 10000     # 页面元素等待超时时间（毫秒）
 PAGE_LOAD_DELAY = 3      # 页面加载延迟时间（秒）
 
-# 验证码处理配置
-AUTO_VERIFICATION = False  # 手动输入验证码
+# XServer登录配置
+LOGIN_EMAIL = os.getenv("XSERVER_EMAIL")
+LOGIN_PASSWORD = os.getenv("XSERVER_PASSWORD")
+TARGET_URL = "https://secure.xserver.ne.jp/xapanel/login/xmgame"
+
+# =====================================================================
+#                      Cloudmail配置加载模块
+# =====================================================================
+
+def load_cloud_mail_config():
+    """从环境变量加载cloudmail配置"""
+    cloud_mail_env = os.getenv("CLOUD_MAIL")
+    if cloud_mail_env:
+        try:
+            config = json.loads(cloud_mail_env)
+            print("✅ 已从环境变量 CLOUD_MAIL 加载邮箱配置")
+            return config
+        except json.JSONDecodeError as e:
+            print(f"❌ CLOUD_MAIL 环境变量JSON解析失败: {e}")
+            return None
+    else:
+        print("❌ 未找到 CLOUD_MAIL 环境变量")
+        return None
+
+# 加载并提取cloudmail配置
+CLOUD_MAIL_CONFIG = load_cloud_mail_config() or {}
+CLOUDMAIL_API_BASE_URL = CLOUD_MAIL_CONFIG.get("API_BASE_URL")
+CLOUDMAIL_EMAIL = CLOUD_MAIL_CONFIG.get("EMAIL")
+CLOUDMAIL_PASSWORD = CLOUD_MAIL_CONFIG.get("PASSWORD")
+CLOUDMAIL_JWT_SECRET = CLOUD_MAIL_CONFIG.get("JWT_SECRET")
+CLOUDMAIL_SEND_EMAIL = CLOUD_MAIL_CONFIG.get("SEND_EMAIL")
+CLOUDMAIL_TO_EMAIL = CLOUD_MAIL_CONFIG.get("TO_EMAIL")
+CLOUDMAIL_SUBJECT = CLOUD_MAIL_CONFIG.get("SUBJECT")
+CLOUDMAIL_LOCAL_FILTER = True  # 启用本地过滤（避免日文主题在API中识别失败）
 
 # =====================================================================
 #                        XServer 自动登录类
@@ -62,52 +87,21 @@ class XServerAutoLogin:
         self.page_load_delay = PAGE_LOAD_DELAY
         self.screenshot_count = 0  # 截图计数器
         
-        # 验证码配置
-        self.auto_verification = AUTO_VERIFICATION
-        self.use_auto_verification = False  # 默认为False，由main.py设置为True
-        
-        # 邮箱验证码获取配置
-        self.webmail_url = WEBMAIL_URL
-        self.webmail_username = WEBMAIL_USERNAME
-        self.webmail_password = WEBMAIL_PASSWORD
-        self.target_email = TARGET_EMAIL
-        
-        # 标签页管理 - 使用编号系统
-        self.tab_1_xserver = None    # 标签页#1 - XServer登录页面
-        self.tab_2_backup = None     # 标签页#2 - 备用标签页（邮箱登录用）
-        self.current_active_tab = 1  # 当前活跃标签页编号
+        # 邮箱API配置
+        self.cloudmail_api_base_url = CLOUDMAIL_API_BASE_URL
+        self.cloudmail_email = CLOUDMAIL_EMAIL
+        self.cloudmail_password = CLOUDMAIL_PASSWORD
+        self.cloudmail_jwt_secret = CLOUDMAIL_JWT_SECRET
+        self.cloudmail_send_email = CLOUDMAIL_SEND_EMAIL
+        self.cloudmail_to_email = CLOUDMAIL_TO_EMAIL
+        self.cloudmail_subject = CLOUDMAIL_SUBJECT
+        self.cloudmail_local_filter = CLOUDMAIL_LOCAL_FILTER
         
         # 续期状态跟踪
         self.old_expiry_time = None      # 原到期时间
         self.new_expiry_time = None      # 新到期时间
         self.renewal_status = "Unknown"  # 续期状态: Success/Unexpired/Failed/Unknown
     
-    def get_active_page(self):
-        """根据当前活跃标签页编号获取页面"""
-        if self.current_active_tab == 1:
-            return self.tab_1_xserver if self.tab_1_xserver else self.page
-        elif self.current_active_tab == 2:
-            return self.tab_2_backup
-        else:
-            return self.page  # 默认返回主页面
-    
-    def switch_to_tab(self, tab_number):
-        """切换到指定编号的标签页"""
-        print(f"🔄 请求切换到标签页#{tab_number}...")
-        
-        if tab_number == 1 and self.tab_1_xserver:
-            old_tab = self.current_active_tab
-            self.current_active_tab = 1
-            print(f"✅ 已切换: 标签页#{old_tab} → 标签页#{tab_number} (XServer登录页面)")
-            return True
-        elif tab_number == 2 and self.tab_2_backup:
-            old_tab = self.current_active_tab
-            self.current_active_tab = 2
-            print(f"✅ 已切换: 标签页#{old_tab} → 标签页#{tab_number} (备用标签页)")
-            return True
-        else:
-            print(f"❌ 标签页#{tab_number} 不存在或未初始化")
-            return False
     
     # =================================================================
     #                       1. 浏览器管理模块
@@ -160,8 +154,7 @@ class XServerAutoLogin:
     async def take_screenshot(self, step_name=""):
         """截图功能 - 用于可视化调试"""
         try:
-            active_page = self.get_active_page()
-            if active_page:
+            if self.page:
                 self.screenshot_count += 1
                 # 使用北京时间（UTC+8）
                 beijing_time = datetime.datetime.now(timezone(timedelta(hours=8)))
@@ -171,8 +164,8 @@ class XServerAutoLogin:
                 # 确保文件名安全
                 filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
                 
-                await active_page.screenshot(path=filename, full_page=True)
-                print(f"📸 截图已保存: {filename} (标签页#{self.current_active_tab})")
+                await self.page.screenshot(path=filename, full_page=True)
+                print(f"📸 截图已保存: {filename}")
                 
         except Exception as e:
             print(f"⚠️ 截图失败: {e}")
@@ -218,45 +211,6 @@ class XServerAutoLogin:
             print(f"❌ 导航失败: {e}")
             return False
     
-    async def prepare_new_tab(self):
-        """预先创建新标签页（用于可能的邮箱验证）"""
-        try:
-            print("🆕 预先创建标签页系统...")
-            
-            # 标签页#1：当前XServer登录页面
-            self.tab_1_xserver = self.page
-            print("📋 标签页#1：XServer登录页面 ✅")
-            
-            # 创建标签页#2：备用标签页
-            print("🆕 正在创建标签页#2：备用标签页...")
-            self.tab_2_backup = await self.context.new_page()
-            
-            # 应用stealth插件到新页面
-            await stealth_async(self.tab_2_backup)
-            print("📋 标签页#2：备用标签页 ✅")
-            
-            # 确保当前活跃标签页是#1（XServer页面）
-            self.current_active_tab = 1
-            print("🎯 当前活跃标签页：#1 (XServer登录页面)")
-            
-            # 验证标签页#1页面状态
-            current_url = self.tab_1_xserver.url
-            print(f"📍 标签页#1 URL: {current_url}")
-            
-            if "xmgame" in current_url:
-                print("✅ 标签页#1 XServer页面确认正常")
-            else:
-                print("⚠️ 标签页#1 URL异常，但继续执行")
-            
-            print("🎉 标签页系统初始化完成！")
-            print("   📋 标签页#1：XServer登录页面 (当前活跃)")
-            print("   📋 标签页#2：备用标签页 (待用)")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ 标签页系统初始化失败: {e}")
-            return False
     
     # =================================================================
     #                       3. 登录表单处理模块
@@ -266,24 +220,23 @@ class XServerAutoLogin:
         """查找登录表单元素"""
         try:
             print("🔍 正在查找登录表单...")
-            active_page = self.get_active_page()
             
             # 等待页面加载完成
             await asyncio.sleep(self.page_load_delay)
             
             # 查找邮箱输入框
             email_selector = "input[name='memberid']"
-            await active_page.wait_for_selector(email_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(email_selector, timeout=self.wait_timeout)
             print("✅ 找到邮箱输入框")
 
             # 查找密码输入框
             password_selector = "input[name='user_password']"
-            await active_page.wait_for_selector(password_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(password_selector, timeout=self.wait_timeout)
             print("✅ 找到密码输入框")
 
             # 查找登录按钮
             login_button_selector = "input[value='ログインする']"
-            await active_page.wait_for_selector(login_button_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(login_button_selector, timeout=self.wait_timeout)
             print("✅ 找到登录按钮")
             
             return email_selector, password_selector, login_button_selector
@@ -294,15 +247,14 @@ class XServerAutoLogin:
     
     async def human_type(self, selector, text):
         """模拟人类输入行为"""
-        active_page = self.get_active_page()
         for char in text:
-            await active_page.type(selector, char, delay=100)  # 100ms delay between characters
+            await self.page.type(selector, char, delay=100)  # 100ms delay between characters
             await asyncio.sleep(0.05)  # Additional small delay
     
     async def perform_login(self):
         """执行登录操作"""
         try:
-            print(f"🎯 当前操作标签页：#{self.current_active_tab}")
+            print("🎯 开始执行登录操作...")
             
             # 查找登录表单元素
             email_selector, password_selector, login_button_selector = await self.find_login_form()
@@ -311,10 +263,9 @@ class XServerAutoLogin:
                 return False
             
             print("📝 正在填写登录信息...")
-            active_page = self.get_active_page()
             
             # 模拟人类行为：慢速输入邮箱
-            await active_page.fill(email_selector, "")  # 清空
+            await self.page.fill(email_selector, "")  # 清空
             await self.human_type(email_selector, self.email)
             print("✅ 邮箱已填写")
             
@@ -322,7 +273,7 @@ class XServerAutoLogin:
             await asyncio.sleep(2)
             
             # 模拟人类行为：慢速输入密码
-            await active_page.fill(password_selector, "")  # 清空
+            await self.page.fill(password_selector, "")  # 清空
             await self.human_type(password_selector, self.password)
             print("✅ 密码已填写")
             
@@ -332,10 +283,10 @@ class XServerAutoLogin:
             # 提交表单
             if login_button_selector:
                 print("🖱️ 点击登录按钮...")
-                await active_page.click(login_button_selector)
+                await self.page.click(login_button_selector)
             else:
                 print("⌨️ 使用回车键提交...")
-                await active_page.press(password_selector, "Enter")
+                await self.page.press(password_selector, "Enter")
             
             print("✅ 登录表单已提交")
             
@@ -347,22 +298,21 @@ class XServerAutoLogin:
             print(f"❌ 登录操作失败: {e}")
             return False
     
+    
     # =================================================================
     #                       4. 验证码处理模块
     # =================================================================
     
     async def handle_verification_page(self):
-        """处理验证页面"""
+        """处理验证页面 - 检测是否需要验证"""
         try:
             print("🔍 检查是否需要验证...")
-            print(f"🎯 当前操作标签页：#{self.current_active_tab}")
             await self.take_screenshot("checking_verification_page")
             
             # 等待页面稳定
             await asyncio.sleep(3)
             
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             print(f"📍 当前URL: {current_url}")
             
             # 检查是否跳转到验证页面
@@ -375,10 +325,11 @@ class XServerAutoLogin:
                 selector = "input[value*='送信']"
                 
                 try:
-                    await active_page.wait_for_selector(selector, timeout=self.wait_timeout)
+                    await self.page.wait_for_selector(selector, timeout=self.wait_timeout)
                     print("✅ 找到发送验证码按钮")
-                    print("📧 已点击发送验证码按钮，验证码正在发送到您的邮箱")
-                    await active_page.click(selector)
+                    print("📧 点击发送验证码按钮，验证码将发送到您的邮箱")
+                    await self.page.click(selector)
+                    print("✅ 已点击发送验证码按钮")
                 except Exception as e:
                     print(f"❌ 查找发送验证码按钮失败: {e}")
                     return False
@@ -394,61 +345,30 @@ class XServerAutoLogin:
             return False
     
     async def handle_code_input_page(self):
-        """处理验证码输入页面"""
+        """处理验证码输入页面 - 自动获取并输入验证码"""
         try:
             print("🔍 检查是否跳转到验证码输入页面...")
-            print(f"🎯 当前操作标签页：#{self.current_active_tab}")
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             print(f"📍 当前URL: {current_url}")
             
             if "loginauth/smssend" in current_url:
                 print("✅ 成功跳转到验证码输入页面！")
-                print("📧 请检查您的邮箱获取验证码")
+                print("📧 验证码已发送到您的邮箱")
                 
                 # 查找验证码输入框
                 print("🔍 正在查找验证码输入框...")
                 code_input_selector = "input[id='auth_code'][name='auth_code']"
                 
                 try:
-                    await active_page.wait_for_selector(code_input_selector, timeout=self.wait_timeout)
+                    await self.page.wait_for_selector(code_input_selector, timeout=self.wait_timeout)
                     print("✅ 找到验证码输入框")
                     
-                    verification_code = None
-                    
-                    # 检查是否使用自动验证码模式（GitHub Actions或use_auto_verification）
-                    if IS_GITHUB_ACTIONS or self.use_auto_verification:
-                        if IS_GITHUB_ACTIONS:
-                            print("🤖 GitHub Actions环境，自动获取验证码...")
-                        else:
-                            print("🤖 本地自动模式，自动获取验证码...")
-                        
-                        # 自动获取验证码
-                        verification_code = await self.get_verification_code_from_email()
+                    # 自动从cloudmail API获取验证码
+                    verification_code = await self.get_verification_code_from_cloudmail()
                     
                     if verification_code:
-                        # 输入验证码
-                        await active_page.fill(code_input_selector, "")
-                        await self.human_type(code_input_selector, verification_code)
-                        print("✅ 验证码已输入")
-                        
-                        # 等待输入完成
-                        await asyncio.sleep(2)
-                        
-                        # 查找并点击登录按钮
-                        print("🔍 正在查找ログイン按钮...")
-                        login_submit_selector = "input[type='submit'][value='ログイン']"
-                        await active_page.wait_for_selector(login_submit_selector, timeout=self.wait_timeout)
-                        print("✅ 找到ログイン按钮")
-                        
-                        # 等待按钮可点击
-                        await asyncio.sleep(1)
-                        await active_page.click(login_submit_selector)
-                        print("✅ 验证码已提交")
-                        
-                        # 等待验证结果
-                        await asyncio.sleep(8)
-                        return True
+                        # 输入验证码并提交
+                        return await self.input_verification_code(verification_code)
                     else:
                         print("❌ 自动获取验证码失败")
                         return False
@@ -464,28 +384,20 @@ class XServerAutoLogin:
             print(f"❌ 处理验证码输入页面时出错: {e}")
             return False
     
-    async def input_verification_code_externally(self, verification_code):
-        """从外部输入验证码（用于main.py调用）"""
+    async def input_verification_code(self, verification_code: str):
+        """输入验证码并提交（供外部调用）"""
         try:
-            print(f"🔑 正在输入外部获取的验证码: {verification_code}")
-            print(f"🎯 当前操作标签页：#{self.current_active_tab}")
-            
-            # 确保在标签页#1上操作
-            if self.current_active_tab != 1:
-                print(f"⚠️ 当前不在标签页#1，自动切换...")
-                self.switch_to_tab(1)
+            print(f"🔑 正在输入验证码: {verification_code}")
             
             # 等待页面稳定
             await asyncio.sleep(2)
-            
-            active_page = self.get_active_page()
             
             # 查找验证码输入框
             code_input_selector = "input[id='auth_code'][name='auth_code']"
             
             # 清空并输入验证码
-            await active_page.fill(code_input_selector, "")
-            await asyncio.sleep(1)  # 等待清空完成
+            await self.page.fill(code_input_selector, "")
+            await asyncio.sleep(1)
             await self.human_type(code_input_selector, verification_code)
             print("✅ 验证码已输入")
             
@@ -495,331 +407,231 @@ class XServerAutoLogin:
             # 查找并点击登录按钮
             print("🔍 正在查找ログイン按钮...")
             login_submit_selector = "input[type='submit'][value='ログイン']"
-            await active_page.wait_for_selector(login_submit_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(login_submit_selector, timeout=self.wait_timeout)
             print("✅ 找到ログイン按钮")
             
             # 等待按钮可点击
             await asyncio.sleep(1)
-            await active_page.click(login_submit_selector)
+            await self.page.click(login_submit_selector)
             print("✅ 验证码已提交")
             
             # 等待验证结果
-            await asyncio.sleep(8)  # 增加等待时间
+            await asyncio.sleep(8)
             return True
             
         except Exception as e:
             print(f"❌ 输入验证码失败: {e}")
-            # 尝试截图保存现场
-            try:
-                await self.take_screenshot("verification_input_failed")
-            except:
-                pass
+            await self.take_screenshot("verification_input_failed")
             return False
     
-    # =================================================================
-    #                       5. 邮箱验证码获取模块
-    # =================================================================
-    
-    async def perform_webmail_login_in_tab2(self):
-        """在标签页#2中执行邮箱登录"""
+    async def get_verification_code_from_cloudmail(self):
+        """从cloudmail API获取验证码"""
         try:
-            print("📧 开始在标签页#2进行邮箱登录...")
+            print("📧 开始从cloudmail API获取验证码...")
             
-            # 确保切换到标签页#2
-            if not self.switch_to_tab(2):
-                return False
+            # 等待邮件发送（验证码邮件需要时间）
+            print("⏰ 等待验证码邮件发送（15秒）...")
+            await asyncio.sleep(15)
             
-            active_page = self.get_active_page()
+            # 步骤1：获取Token
+            print("🔑 正在获取邮箱API Token...")
+            token_result = self._get_mail_api_token()
             
-            # 导航到邮箱登录页面
-            print(f"🌐 正在访问邮箱: {self.webmail_url}")
-            await active_page.goto(self.webmail_url, wait_until='load')
+            if token_result.get("code") != 200:
+                print(f"❌ Token获取失败: {token_result.get('message')}")
+                return None
             
-            # 等待页面加载
-            await active_page.wait_for_selector("body", timeout=self.wait_timeout)
-            print("✅ 邮箱页面加载成功")
+            token = token_result.get("data", {}).get("token")
+            print("✅ Token获取成功")
             
-            # 等待页面完全加载
-            print("⏰ 等待页面完全加载...")
-            await asyncio.sleep(5)
+            # 步骤2：查询邮件列表
+            print(f"📬 正在查询邮箱 {self.cloudmail_to_email} 的最新验证码邮件...")
             
-            # 打印页面信息用于调试
-            print(f"📍 当前URL: {active_page.url}")
-            print(f"📄 页面标题: {await active_page.title()}")
-            
-            # 检查页面是否包含预期元素
-            page_content = await active_page.content()
-            if "邮箱" in page_content or "email" in page_content.lower():
-                print("✅ 页面包含邮箱相关内容")
+            # 根据LOCAL_FILTER决定是否在API中过滤主题
+            if self.cloudmail_local_filter:
+                # 本地过滤：不传递主题到API，获取所有邮件后在本地过滤
+                mail_result = self._get_mail_list(
+                    token=token,
+                    target_email=self.cloudmail_to_email,
+                    sender_email=self.cloudmail_send_email,
+                    subject=None
+                )
             else:
-                print("⚠️ 页面可能未完全加载或结构不同")
+                # API过滤：直接在API请求中过滤主题
+                mail_result = self._get_mail_list(
+                    token=token,
+                    target_email=self.cloudmail_to_email,
+                    sender_email=self.cloudmail_send_email,
+                    subject=self.cloudmail_subject
+                )
             
-            # 登录部分已确定，保持简化（完全按照code.py的配置）
-            email_selector = "input[placeholder='邮箱']"
-            password_selector = "input[placeholder='密码']"
-            login_selector = "button.el-button.el-button--primary.btn"
+            if mail_result.get("code") != 200:
+                print(f"❌ 邮件查询失败: {mail_result.get('message')}")
+                return None
             
-            # 查找邮箱输入框
-            try:
-                await active_page.wait_for_selector(email_selector, timeout=self.wait_timeout)
-                print("✅ 找到邮箱输入框")
-            except:
-                print("❌ 未找到邮箱输入框")
-                return False
+            # 步骤3：提取邮件列表
+            data_content = mail_result.get("data", [])
+            mail_list = data_content if isinstance(data_content, list) else data_content.get("list", [])
             
-            # 查找密码输入框
-            try:
-                await active_page.wait_for_selector(password_selector, timeout=self.wait_timeout)
-                print("✅ 找到密码输入框")
-            except:
-                print("❌ 未找到密码输入框")
-                return False
+            if not mail_list:
+                print("❌ 未找到邮件")
+                return None
             
-            # 查找登录按钮
-            try:
-                await active_page.wait_for_selector(login_selector, timeout=self.wait_timeout)
-                print("✅ 找到登录按钮")
-            except:
-                print("❌ 未找到登录按钮")
-                return False
-            
-            # 执行登录操作（完全按照code.py的逻辑）
-            print("📝 正在执行邮箱登录...")
-            
-            # 填写邮箱地址
-            print("📧 正在填写邮箱地址...")
-            await active_page.fill(email_selector, "")  # 清空
-            await self.human_type_in_tab(active_page, email_selector, self.webmail_username)
-            print("✅ 邮箱已填写")
-            
-            # 等待一下
-            await asyncio.sleep(2)
-            
-            # 填写密码
-            print("🔐 正在填写密码...")
-            await active_page.fill(password_selector, "")  # 清空
-            await self.human_type_in_tab(active_page, password_selector, self.webmail_password)
-            print("✅ 密码已填写")
-            
-            # 等待一下
-            await asyncio.sleep(2)
-            
-            # 点击登录按钮
-            print("🖱️ 点击登录按钮...")
-            await active_page.click(login_selector)
-            print("✅ 登录表单已提交")
-            
-            # 等待登录响应
-            await asyncio.sleep(5)
-            
-            # 检查登录结果（完全按照code.py的逻辑）
-            print("🔍 正在检查登录结果...")
-            
-            # 等待页面响应
-            await asyncio.sleep(3)
-            
-            current_url = active_page.url
-            page_title = await active_page.title()
-            
-            print(f"📍 当前URL: {current_url}")
-            print(f"📄 页面标题: {page_title}")
-            
-            # 检查是否成功跳转到邮箱页面
-            if "email" in current_url:
-                print("✅ 成功跳转到邮箱页面，登录成功！")
-                return True
-            else:
-                print("❌ 邮箱登录失败")
-                return False
-                
-        except Exception as e:
-            print(f"❌ 邮箱登录过程出错: {e}")
-            return False
-            
-    async def human_type_in_tab(self, page, selector, text):
-        """在指定标签页中模拟人类输入行为"""
-        for char in text:
-            await page.type(selector, char, delay=100)
-            await asyncio.sleep(0.05)
-    
-    async def select_target_mailbox_in_tab2(self):
-        """在标签页#2中选择目标邮箱"""
-        try:
-            print("📧 正在选择目标邮箱...")
-            
-            active_page = self.get_active_page()
-            
-            # 等待邮箱列表加载
-            await asyncio.sleep(3)
-            
-            # 使用有效的选择器
-            selector = f"div.account:has-text('{self.target_email}')"
-            
-            # 等待并点击目标邮箱
-            await active_page.wait_for_selector(selector, timeout=self.wait_timeout)
-            await active_page.locator(selector).first.click()
-            
-            print(f"✅ 已选择 {self.target_email} 邮箱")
-            return True
-            
-        except Exception as e:
-            print(f"❌ 选择目标邮箱失败: {e}")
-            return False
-    
-    async def scroll_to_load_emails_in_tab2(self):
-        """在标签页#2中滚动页面加载所有邮件"""
-        try:
-            print("📜 正在滚动页面加载所有邮件...")
-            
-            active_page = self.get_active_page()
-            
-            # 多次滚动以确保加载所有邮件
-            for i in range(5):
-                await active_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await asyncio.sleep(1)
-                print(f"   滚动第 {i+1} 次")
-            
-            # 滚动回顶部
-            await active_page.evaluate("window.scrollTo(0, 0)")
-            await asyncio.sleep(2)
-            
-            print("✅ 页面滚动完成，邮件列表已加载")
-            return True
-            
-        except Exception as e:
-            print(f"❌ 滚动加载邮件失败: {e}")
-            return False
-            
-    async def search_verification_email_in_tab2(self):
-        """在标签页#2中搜索XServer验证码邮件"""
-        try:
-            print("🔍 正在搜索XServer验证码邮件...")
-            
-            active_page = self.get_active_page()
-            
-            # 滚动加载邮件
-            await self.scroll_to_load_emails_in_tab2()
-            
-            # 使用有效的选择器查找邮件
-            selector = "text=/【XServerアカウント】ログイン用認証コードのお知らせ/"
-            
-            # 查找XServer邮件
-            xserver_emails = await active_page.locator(selector).all()
-            
-            if not xserver_emails:
-                print("❌ 未找到XServer验证码邮件")
-                return False
-            
-            print(f"✅ 找到 {len(xserver_emails)} 封XServer验证码邮件")
-            
-            # 点击第一封（最新的）邮件
-            print("🎯 正在打开最新的验证码邮件...")
-            await xserver_emails[0].click()
-            await asyncio.sleep(3)
-            print("✅ 已成功打开最新的验证码邮件")
-            return True
-            
-        except Exception as e:
-            print(f"❌ 搜索验证码邮件失败: {e}")
-            return False
-    
-    async def extract_verification_code_in_tab2(self):
-        """在标签页#2中从邮件内容提取验证码"""
-        try:
-            print("🔍 正在提取验证码...")
-            
-            active_page = self.get_active_page()
-            
-            # 获取页面内容
-            page_content = await active_page.content()
-            
-            # 根据日志确定的有效验证码匹配模式
-            code_patterns = [
-                # 主要模式 - 日志显示成功的模式
-                r'【認証コード】[　\s]*：[　\s]*(\d{4,8})',
-                
-                # 备用模式
-                r'【認証コード】[　\s]*[：:][　\s]*(\d{4,8})',
-                r'認証コード[　\s]*[：:][　\s]*(\d{4,8})',
+            # 步骤4：过滤XServer验证码邮件（精确匹配主题）
+            xserver_mails = [
+                mail for mail in mail_list 
+                if mail.get('subject', '').strip() == self.cloudmail_subject
             ]
             
-            # 使用确定有效的模式提取验证码
-            for pattern in code_patterns:
-                matches = re.findall(pattern, page_content, re.IGNORECASE | re.MULTILINE)
-                if matches:
-                    # 过滤掉明显不是验证码的结果
-                    valid_codes = [code for code in matches if len(code) >= 4 and len(code) <= 8]
-                    if valid_codes:
-                        verification_code = valid_codes[0]
-                        print(f"✅ 找到验证码: {verification_code}")
-                        return verification_code
-            
-            print("❌ 未能提取到验证码")
-            return None
-            
-        except Exception as e:
-            print(f"❌ 提取验证码失败: {e}")
-            return None
-    
-    async def get_verification_code_from_email(self):
-        """完整的邮箱验证码获取流程"""
-        try:
-            print("📧 开始邮箱验证码获取流程...")
-            
-            # 等待验证码邮件发送
-            print("⏰ 等待验证码邮件发送...")
-            await asyncio.sleep(30)
-            
-            # 步骤1：在标签页#2执行邮箱登录
-            if not await self.perform_webmail_login_in_tab2():
+            if not xserver_mails:
+                print(f"❌ 未找到主题为 '{self.cloudmail_subject}' 的邮件")
                 return None
             
-            # 步骤2：选择目标邮箱
-            if not await self.select_target_mailbox_in_tab2():
-                return None
+            # 步骤5：只保留最新的一封邮件
+            latest_mail = [xserver_mails[0]]
+            print(f"✅ 找到最新验证码邮件")
             
-            # 步骤3：搜索验证码邮件
-            if not await self.search_verification_email_in_tab2():
-                return None
+            # 步骤6：保存到JSON文件
+            json_filename = self._save_mail_to_json(latest_mail)
+            print(f"💾 邮件已保存到: {json_filename}")
             
-            # 步骤4：提取验证码
-            verification_code = await self.extract_verification_code_in_tab2()
+            # 步骤7：从JSON文件读取并提取验证码
+            verification_code = self._extract_code_from_json(json_filename)
+            
             if verification_code:
-                print(f"🎉 成功获取验证码: {verification_code}")
+                print(f"🎉 成功提取验证码: {verification_code}")
                 return verification_code
             else:
-                print("❌ 验证码获取失败")
+                print("❌ 未能从邮件中提取验证码")
                 return None
-                
+            
         except Exception as e:
-            print(f"❌ 邮箱验证码获取流程失败: {e}")
+            print(f"❌ 从cloudmail获取验证码失败: {e}")
+            import traceback
+            traceback.print_exc()
             return None
+    
+    def _get_mail_api_token(self):
+        """获取邮箱API Token"""
+        url = f"{self.cloudmail_api_base_url}/api/public/genToken"
+        headers = {"Authorization": self.cloudmail_jwt_secret}
+        payload = {
+            "email": self.cloudmail_email,
+            "password": self.cloudmail_password
+        }
         
-        finally:
-            # 切换回标签页#1
-            print("🔙 切换回标签页#1...")
-            self.switch_to_tab(1)
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {"code": -1, "message": str(e)}
+    
+    def _get_mail_list(self, token: str, target_email: str, sender_email: str = None, subject: str = None):
+        """查询邮件列表"""
+        url = f"{self.cloudmail_api_base_url}/api/public/emailList"
+        headers = {"Authorization": token}
+        
+        payload = {
+            "toEmail": target_email,
+            "timeSort": "desc",
+            "type": 0,
+            "num": 1,
+            "size": 20
+        }
+        
+        # 添加发件人过滤
+        if sender_email:
+            payload["sendEmail"] = sender_email
+        
+        # 添加主题过滤（仅当不使用本地过滤时）
+        if subject:
+            payload["subject"] = subject
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {"code": -1, "message": str(e)}
+    
+    def _extract_verification_code(self, mail_content: str):
+        """从邮件内容中提取验证码"""
+        # 验证码匹配模式（格式：【認証コード】　　　　　　　： 88617）
+        # 匹配【認証コード】后面跟任意数量的全角/半角空格，然后是冒号，再跟数字
+        pattern = r'【認証コード】[\s　]+[：:]\s*(\d{4,8})'
+        
+        matches = re.findall(pattern, mail_content, re.IGNORECASE | re.MULTILINE)
+        if matches:
+            # 过滤有效的验证码（4-8位数字）
+            valid_codes = [code for code in matches if 4 <= len(code) <= 8]
+            if valid_codes:
+                return valid_codes[0]
+        
+        # 如果没匹配到，打印调试信息
+        print("❌ 未能匹配到验证码")
+        print(f"📝 邮件内容长度: {len(mail_content)} 字符")
+        # 尝试查找邮件中包含"認証コード"的行
+        for line in mail_content.split('\n'):
+            if '認証コード' in line:
+                print(f"🔍 包含認証コード的行: {line}")
+        
+        return None
+    
+    def _save_mail_to_json(self, mail_list):
+        """保存邮件到JSON文件"""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"xserver_verification_{timestamp}.json"
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(mail_list, f, ensure_ascii=False, indent=2)
+        
+        return filename
+    
+    def _extract_code_from_json(self, json_filename):
+        """从JSON文件中读取并提取验证码"""
+        try:
+            # 读取JSON文件
+            with open(json_filename, 'r', encoding='utf-8') as f:
+                mail_list = json.load(f)
+            
+            if not mail_list:
+                print("❌ JSON文件中没有邮件数据")
+                return None
+            
+            # 获取第一封邮件
+            mail = mail_list[0]
+            mail_subject = mail.get('subject', '')
+            # 邮件内容在'text'字段中
+            mail_content = mail.get('text', '') or mail.get('content', '')
+            
+            print(f"📧 邮件主题: {mail_subject}")
+            print(f"📄 邮件内容长度: {len(mail_content)} 字符")
+            
+            if not mail_content:
+                print("❌ 邮件内容为空")
+                return None
+            
+            # 使用正则表达式提取验证码
+            verification_code = self._extract_verification_code(mail_content)
+            return verification_code
+            
+        except Exception as e:
+            print(f"❌ 从JSON文件提取验证码失败: {e}")
+            return None
     
     # =================================================================
-    #                       6. 登录结果处理模块
+    #                       5. 登录结果处理模块
     # =================================================================
     
     async def handle_login_result(self):
         """处理登录结果"""
         try:
             print("🔍 正在检查登录结果...")
-            print(f"🎯 当前操作标签页：#{self.current_active_tab}")
-            
-            # 确保在标签页#1上操作
-            if self.current_active_tab != 1:
-                print(f"⚠️ 当前不在标签页#1，自动切换...")
-                self.switch_to_tab(1)
             
             # 等待页面加载
             await asyncio.sleep(3)
             
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             print(f"📍 当前URL: {current_url}")
             
             # 简单直接：只判断是否跳转到成功页面
@@ -836,19 +648,19 @@ class XServerAutoLogin:
                 print("🔍 正在查找ゲーム管理按钮...")
                 try:
                     game_button_selector = "a:has-text('ゲーム管理')"
-                    await active_page.wait_for_selector(game_button_selector, timeout=self.wait_timeout)
+                    await self.page.wait_for_selector(game_button_selector, timeout=self.wait_timeout)
                     print("✅ 找到ゲーム管理按钮")
                     
                     # 点击ゲーム管理按钮
                     print("🖱️ 正在点击ゲーム管理按钮...")
-                    await active_page.click(game_button_selector)
+                    await self.page.click(game_button_selector)
                     print("✅ 已点击ゲーム管理按钮")
                     
                     # 等待页面跳转
                     await asyncio.sleep(5)
                     
                     # 验证是否跳转到游戏管理页面
-                    final_url = active_page.url
+                    final_url = self.page.url
                     print(f"📍 最终页面URL: {final_url}")
                     
                     expected_game_url = "https://secure.xserver.ne.jp/xmgame/game/index"
@@ -887,20 +699,13 @@ class XServerAutoLogin:
         """获取服务器时间信息"""
         try:
             print("🕒 正在获取服务器时间信息...")
-            print(f"🎯 当前操作标签页：#{self.current_active_tab}")
-            
-            # 确保在标签页#1上操作
-            if self.current_active_tab != 1:
-                print(f"⚠️ 当前不在标签页#1，自动切换...")
-                self.switch_to_tab(1)
             
             # 等待页面加载完成
             await asyncio.sleep(3)
             
             # 使用已验证有效的选择器
             try:
-                active_page = self.get_active_page()
-                elements = await active_page.locator("text=/残り\\d+時間\\d+分/").all()
+                elements = await self.page.locator("text=/残り\\d+時間\\d+分/").all()
                 
                 for element in elements:
                     element_text = await element.text_content()
@@ -956,13 +761,12 @@ class XServerAutoLogin:
         try:
             print("🔄 正在查找アップグレード・期限延長按钮...")
             
-            active_page = self.get_active_page()
             upgrade_selector = "a:has-text('アップグレード・期限延長')"
-            await active_page.wait_for_selector(upgrade_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(upgrade_selector, timeout=self.wait_timeout)
             print("✅ 找到アップグレード・期限延長按钮")
             
             # 点击按钮
-            await active_page.click(upgrade_selector)
+            await self.page.click(upgrade_selector)
             print("✅ 已点击アップグレード・期限延長按钮")
             
             # 等待页面跳转
@@ -977,8 +781,7 @@ class XServerAutoLogin:
     async def verify_upgrade_page(self):
         """验证升级页面"""
         try:
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/index"
             
             print(f"📍 升级页面URL: {current_url}")
@@ -1005,8 +808,7 @@ class XServerAutoLogin:
             restriction_selector = "text=/残り契約時間が24時間を切るまで、期限の延長は行えません/"
             
             try:
-                active_page = self.get_active_page()
-                element = await active_page.wait_for_selector(restriction_selector, timeout=5000)
+                element = await self.page.wait_for_selector(restriction_selector, timeout=5000)
                 restriction_text = await element.text_content()
                 print(f"✅ 找到期限延长限制信息")
                 print(f"📝 限制信息: {restriction_text}")
@@ -1044,17 +846,15 @@ class XServerAutoLogin:
         try:
             print("🔍 正在查找'期限を延長する'按钮...")
             
-            active_page = self.get_active_page()
-            
             # 使用有效的选择器
             extension_selector = "a:has-text('期限を延長する')"
             
             # 等待并点击按钮
-            await active_page.wait_for_selector(extension_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(extension_selector, timeout=self.wait_timeout)
             print("✅ 找到'期限を延長する'按钮")
             
             # 点击按钮
-            await active_page.click(extension_selector)
+            await self.page.click(extension_selector)
             print("✅ 已点击'期限を延長する'按钮")
             
             # 等待页面跳转
@@ -1072,8 +872,7 @@ class XServerAutoLogin:
     async def verify_extension_input_page(self):
         """验证是否成功跳转到期限延长输入页面"""
         try:
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/input"
             
             print(f"📍 当前页面URL: {current_url}")
@@ -1100,17 +899,15 @@ class XServerAutoLogin:
         try:
             print("🔍 正在查找'確認画面に進む'按钮...")
             
-            active_page = self.get_active_page()
-            
             # 使用button元素的选择器
             confirmation_selector = "button[type='submit']:has-text('確認画面に進む')"
             
             # 等待并点击按钮
-            await active_page.wait_for_selector(confirmation_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(confirmation_selector, timeout=self.wait_timeout)
             print("✅ 找到'確認画面に進む'按钮")
             
             # 点击按钮
-            await active_page.click(confirmation_selector)
+            await self.page.click(confirmation_selector)
             print("✅ 已点击'確認画面に進む'按钮")
             
             # 等待页面跳转
@@ -1128,8 +925,7 @@ class XServerAutoLogin:
     async def verify_extension_conf_page(self):
         """验证是否成功跳转到期限延长确认页面"""
         try:
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/conf"
             
             print(f"📍 当前页面URL: {current_url}")
@@ -1160,13 +956,11 @@ class XServerAutoLogin:
         try:
             print("📅 正在获取续期后的时间信息...")
             
-            active_page = self.get_active_page()
-            
             # 使用有效的选择器
             time_selector = "tr:has(th:has-text('延長後の期限'))"
             
             # 等待并获取时间信息
-            time_element = await active_page.wait_for_selector(time_selector, timeout=self.wait_timeout)
+            time_element = await self.page.wait_for_selector(time_selector, timeout=self.wait_timeout)
             print("✅ 找到续期后时间信息")
             
             # 获取整行，然后提取td内容
@@ -1188,17 +982,15 @@ class XServerAutoLogin:
         try:
             print("🔍 正在查找最终的'期限を延長する'按钮...")
             
-            active_page = self.get_active_page()
-            
             # 基于HTML属性查找按钮
             final_button_selector = "button[type='submit']:has-text('期限を延長する')"
             
             # 等待按钮出现
-            await active_page.wait_for_selector(final_button_selector, timeout=self.wait_timeout)
+            await self.page.wait_for_selector(final_button_selector, timeout=self.wait_timeout)
             print("✅ 找到最终的'期限を延長する'按钮")
             
             # 点击按钮执行最终续期
-            await active_page.click(final_button_selector)
+            await self.page.click(final_button_selector)
             print("✅ 已点击最终续期按钮")
             
             # 等待页面跳转
@@ -1219,8 +1011,7 @@ class XServerAutoLogin:
         try:
             print("🔍 正在验证续期操作结果...")
             
-            active_page = self.get_active_page()
-            current_url = active_page.url
+            current_url = self.page.url
             expected_url = "https://secure.xserver.ne.jp/xmgame/game/freeplan/extend/do"
             
             print(f"📍 当前页面URL: {current_url}")
@@ -1232,8 +1023,8 @@ class XServerAutoLogin:
             text_success = False
             try:
                 success_text_selector = "p:has-text('期限を延長しました。')"
-                await active_page.wait_for_selector(success_text_selector, timeout=5000)
-                success_text = await active_page.query_selector(success_text_selector)
+                await self.page.wait_for_selector(success_text_selector, timeout=5000)
+                success_text = await self.page.query_selector(success_text_selector)
                 if success_text:
                     text_content = await success_text.text_content()
                     print(f"✅ 找到成功提示文字: {text_content.strip()}")
@@ -1336,10 +1127,6 @@ class XServerAutoLogin:
             if not await self.navigate_to_login():
                 return False
             
-            # 步骤3.5：预先创建新标签页（用于邮箱验证）
-            if not await self.prepare_new_tab():
-                return False
-            
             # 步骤4：执行登录操作
             if not await self.perform_login():
                 return False
@@ -1349,6 +1136,8 @@ class XServerAutoLogin:
             if verification_result:
                 print("✅ 验证流程已处理")
                 await asyncio.sleep(3)  # 等待验证完成后的页面跳转
+            else:
+                print("⚠️ 验证流程未完成，可能需要手动处理")
             
             # 步骤6：检查登录结果
             if not await self.handle_login_result():
@@ -1395,13 +1184,26 @@ async def main():
     print(f"   XServer密码: {'*' * len(LOGIN_PASSWORD)}")
     print(f"   目标网站: {TARGET_URL}")
     print(f"   无头模式: {USE_HEADLESS}")
-    print(f"   自动验证: 启用 (自动获取邮箱验证码)")
     print()
-    print("📧 邮箱验证码配置:")
-    print(f"   邮箱网站: {WEBMAIL_URL}")
-    print(f"   登录用户: {WEBMAIL_USERNAME}")
-    print(f"   邮箱密码: {'*' * len(WEBMAIL_PASSWORD)}")
-    print(f"   目标邮箱: {TARGET_EMAIL}")
+    
+    # 显示邮箱配置
+    if CLOUD_MAIL_CONFIG:
+        is_github = os.getenv("GITHUB_ACTIONS") == "true"
+        if is_github:
+            print("📧 邮箱API配置 (从 CLOUD_MAIL 环境变量):")
+        else:
+            print("📧 邮箱API配置 (从 CLOUD_MAIL.json 文件):")
+        
+        print(f"   API地址: {CLOUDMAIL_API_BASE_URL}")
+        print(f"   登录邮箱: {CLOUDMAIL_EMAIL}")
+        print(f"   目标邮箱: {CLOUDMAIL_TO_EMAIL}")
+        print(f"   发件人: {CLOUDMAIL_SEND_EMAIL}")
+        if CLOUDMAIL_JWT_SECRET and len(CLOUDMAIL_JWT_SECRET) > 8:
+            print(f"   JWT密钥: {CLOUDMAIL_JWT_SECRET[:8]}{'*' * (len(CLOUDMAIL_JWT_SECRET) - 8)}")
+        elif CLOUDMAIL_JWT_SECRET:
+            print(f"   JWT密钥: {'*' * len(CLOUDMAIL_JWT_SECRET)}")
+    else:
+        print("⚠️ 邮箱API配置未加载，验证码功能不可用")
     print()
     
     # 确认配置
@@ -1413,9 +1215,6 @@ async def main():
     
     # 创建并运行自动登录器
     auto_login = XServerAutoLogin()
-    
-    # 启用自动验证码获取
-    auto_login.use_auto_verification = True
     
     success = await auto_login.run()
     
