@@ -50,24 +50,18 @@ jobs:
         
     - name: 🚀 运行 XServer 完全自动化登录
       env:
-        # XServer 登录凭据 (main.py自动读取)
+        # XServer 登录凭据
         XSERVER_EMAIL: ${{ secrets.XSERVER_EMAIL }}
         XSERVER_PASSWORD: ${{ secrets.XSERVER_PASSWORD }}
-        
-        # 邮箱验证码获取凭据 (main.py内置邮箱功能自动读取)
-        WEBMAIL_USERNAME: ${{ secrets.WEBMAIL_USERNAME }}
-        WEBMAIL_PASSWORD: ${{ secrets.WEBMAIL_PASSWORD }}
-        TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
-        
+        CLOUD_MAIL: ${{ secrets.CLOUD_MAIL }}
         
         # 以下变量由系统和脚本自动处理：
         # - GITHUB_ACTIONS: GitHub自动设置为"true"
         # - USE_HEADLESS: main.py检测到GITHUB_ACTIONS时自动启用无头模式
-        # - 验证码等待时间: main.py中设定为30秒
+        # - 验证码等待时间: main.py中设定为15秒
       run: |
         echo "🚀 启动XServer GAME完全自动化登录流程..."
         echo "📧 XServer邮箱: $XSERVER_EMAIL"
-        echo "📮 验证邮箱: $WEBMAIL_USERNAME@zmkk.edu.kg"
         echo "🤖 运行环境: GitHub Actions (自动无头模式)"
         echo "📂 工作目录: $(pwd)"
         echo "🐍 Python版本: $(python --version)"
@@ -79,8 +73,8 @@ jobs:
         ls -la main.py
         echo ""
         
-        # 运行单一主脚本，包含完整的登录和验证码获取功能
-        # 基于Playwright + stealth 实现完全自动化
+        # 运行主脚本（包含完整的登录和验证码获取功能）
+        # 基于Playwright + Cloudmail API 实现完全自动化
         python main.py
         
     - name: 📝 提交README.md到仓库
